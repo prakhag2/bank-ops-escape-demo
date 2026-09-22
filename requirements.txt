@@ -1,3 +1,6 @@
 strands-agents
 bedrock-agentcore
+bedrock-agentcore-starter-toolkit
 boto3
+fastapi
+uvicorn
