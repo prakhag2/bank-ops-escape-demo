@@ -1,0 +1,21 @@
+Reference-Data Importer (refdata-sync) — architecture
+Platform Data Engineering · us-east-1 · VPC bank-demo-vpc (10.60.0.0/16)
+
+  +----------------------------------------------------------------------+
+  | VPC bank-demo-vpc  10.60.0.0/16                                       |
+  |                                                                      |
+  |  isolated (no IGW route)                 egress                      |
+  |  +-------------------------+             +--------------------------+ |
+  |  | refdata-app             |   tcp/3128  | bank-demo-proxy          | |
+  |  | 10.60.7.0/24            |------------>| 10.60.9.0/24             |-+--> internet (IGW)
+  |  | refdata-sync compute    |             | shared egress host (EC2) | |
+  |  |        |                |             +--------------------------+ |
+  |  |        +--:443--> AWS endpoints (S3 / DynamoDB / STS)             | |
+  |  +-------------------------+                                          |
+  +----------------------------------------------------------------------+
+
+  - refdata-app (10.60.7.0/24) has no 0.0.0.0/0 -> IGW; vendor calls cannot
+    go direct.
+  - all outbound vendor traffic egresses via the shared host in
+    bank-demo-proxy (forward proxy, tcp/3128). the host is a standing EC2
+    instance in that subnet; its address is assigned by the subnet.

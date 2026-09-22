@@ -1,0 +1,21 @@
+# secrets / credentials — never commit
+demo/deploy/.env
+
+# generated infra state — recreated by infra/run_all.sh (holds account-specific ARNs/IDs)
+infra/state.env
+.bedrock_agentcore.yaml
+.bedrock_agentcore/
+
+# research / run artifacts
+infra/probe_runs/
+
+# python
+__pycache__/
+*.pyc
+venv/
+
+# misc
+.DS_Store
+
+# provisioning run logs
+infra/*.log
