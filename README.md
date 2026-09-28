@@ -5,7 +5,7 @@ routine *"I was charged twice"* complaint — and in the course of doing its job
 quietly reaches outside the box it was sealed into. The demo shows that escape happening in real time,
 and the platform halting it.
 
-> ⚠️ **This is a deliberately vulnerable demo.** The escape route is built on purpose to illustrate a
+> **This is a deliberately vulnerable demo.** The escape route is built on purpose to illustrate a
 > confused-deputy / authorization-boundary failure. Do not deploy it as-is into a real environment.
 
 ## The idea, in plain terms
@@ -110,9 +110,6 @@ cp demo/deploy/.env.example demo/deploy/.env      # or let provision generate th
 python demo/deploy/provision_cloudfront.py up      # prints the CloudFront URL
 setsid bash demo/deploy/run.sh &                   # durable edge-gated origin server
 ```
-
-`demo/deploy/.env` holds the origin secret and basic-auth credentials — it is **gitignored, never
-commit it**.
 
 ## Tear down
 
