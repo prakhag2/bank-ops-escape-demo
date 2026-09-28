@@ -1,4 +1,4 @@
-"""Turn the raw audit transcript ([agent · kind] text tuples, exactly as stream_logs.py prints them)
+"""Turn the raw audit transcript ([agent · kind] text tuples, exactly as audit.py emits them)
 into UI steps. Each step is ONE plain-language sentence saying what happened, written by the model from
 the step's actual content — nothing hardcoded, so the same code narrates any case or any agent. The raw
 tool input and raw tool result ride along untouched, for the sliding detail panel. This lives in the DEMO

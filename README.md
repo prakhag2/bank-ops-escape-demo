@@ -121,7 +121,7 @@ bash infra/teardown.sh
 
 ```
 *.py                     agent + tool code (orchestrator, reconciliation, tools, runtimes)
-infra/                   provisioning scripts (01–08), config, seed, teardown, probes
+infra/                   provisioning scripts (01–08), config, seed, teardown
 infra/policy_docs/       the SOP + network runbook ingested into the knowledge base
 demo/                    live viewer — server.py (SSE run engine) + ui/ (static front end)
 demo/deploy/             CloudFront + edge-gate deployment
