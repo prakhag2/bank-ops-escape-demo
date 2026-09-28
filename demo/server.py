@@ -85,7 +85,7 @@ _agentcore = boto3.client("bedrock-agentcore", region_name=REGION,
                           config=Config(read_timeout=300, connect_timeout=10, retries={"max_attempts": 0}))
 
 # One presenter, one active run. Everything about the current run lives here; a new run replaces it.
-RUN = {"session": None, "steps": [], "mode": "playing", "step_credits": 0,
+RUN = {"session": None, "steps": [], "story": [], "mode": "playing", "step_credits": 0,
        "done": False, "answer": "", "error": ""}
 
 
@@ -141,6 +141,23 @@ def _tail(run, orch_arn, recon_arn):
             sm = annotate.summarize(step["agent"], step["kind"], step["tool"],
                                     step["input"], step["result"], step["text"])
             step["summary"], step["detail"] = sm["headline"], sm["detail"]
+            # the reconciliation agent is the story's central character: give each of its steps the next
+            # first-person story beat, threaded through the beats so far so the monologue connects
+            step["story"] = ""
+            if step["agent"] == "reconciliation":
+                step["story"] = annotate.narrate(step["agent"], step["kind"], step["tool"], step["input"],
+                                                 step["result"], step["text"], run["story"])
+                if step["story"]:
+                    run["story"].append(step["story"])
+                    run["story"] = run["story"][-6:]
+            if step["kind"] == "tool":         # the model directs how this step appears in the escape scene
+                viz = annotate.direct(step["agent"], step["tool"], step["input"],
+                                      step["result"], step["summary"], step["detail"], run["nodes"],
+                                      is_escape=_is_escape(step))
+                step["viz"] = viz
+                if not any(n["key"] == viz["key"] for n in run["nodes"]):
+                    run["nodes"].append({"key": viz["key"], "action": viz["action"],
+                                         "from": viz["from"], "to": viz["to"]})
             if run["session"] == RUN["session"]:  # drop late events from a superseded run
                 run["steps"].append(step)
         time.sleep(2)
@@ -173,7 +190,7 @@ async def start(req: Request):
         return {"ok": False, "error": "empty query"}
     orch_arn, recon_arn = _cfg("ORCH_RUNTIME_ARN"), _cfg("RECON_RUNTIME_ARN")
     session = f"demo-{uuid.uuid4().hex}{uuid.uuid4().hex}"[:48]  # AgentCore needs >=33 chars
-    RUN.update({"session": session, "steps": [], "mode": "playing", "step_credits": 0,
+    RUN.update({"session": session, "steps": [], "story": [], "nodes": [], "mode": "playing", "step_credits": 0,
                 "done": False, "answer": "", "error": ""})
     run = RUN
     threading.Thread(target=_tail, args=(run, orch_arn, recon_arn), daemon=True).start()
@@ -210,14 +227,6 @@ async def stream(request: Request):
                 step = dict(RUN["steps"][sent], index=sent, mode=RUN["mode"])
                 sent += 1
                 yield f"event: step\ndata: {json.dumps(step)}\n\n"
-                if _is_escape(step):   # climax reached — end the reveal here, whatever the agent does next
-                    RUN["done"] = True  # stop tailing; the microVM finishes on its own
-                    yield "event: done\ndata: " + json.dumps({
-                        "escaped": True, "error": "",
-                        "answer": ("The duplicate-charge check was halted: the reconciliation subagent "
-                                   "stepped outside its isolated runtime (an unauthorized network egress). "
-                                   "No refund was issued and the attempt has been flagged for review.")}) + "\n\n"
-                    return
                 continue
             if RUN["done"] and sent >= len(RUN["steps"]):
                 yield f"event: done\ndata: {json.dumps({'answer': RUN['answer'], 'error': RUN['error']})}\n\n"

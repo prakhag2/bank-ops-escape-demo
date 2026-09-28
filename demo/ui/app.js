@@ -87,11 +87,13 @@ function renderAgents(){
   const node=(k,a)=>{
     const leaves=a.tools.map(t=>
       `<div class="tleaf" style="--acc:${acc(t.icon)}"
-            onclick="openTool('${k}','${t.name}')" title="${esc(t.label)}">
-         <span class="tl-ic">${use(t.icon)}</span>
-         <span class="tl-tx"><span class="tl-nm">${t.label}</span><span class="tl-badge">${t.badge}</span></span>
+            onclick="openTool('${k}','${t.name}')" title="${esc(t.doc||t.label)}">
+         <span class="tl-mk"></span><span class="tl-nm">${t.label}</span>
        </div>`).join('');
-    return `<div class="tnode ${a.cls}" id="ac-${k}">
+    const proc = k==='reconciliation'
+      ? `<button class="tl-proc" onclick="event.stopPropagation();openPolicy()"
+             title="The procedure this agent is told to follow"><span class="tl-mk"></span>${use('book')}<span>procedure</span></button>` : '';
+    return `<div class="tnode ${a.cls} tools-open" id="ac-${k}">
        <div class="tnode-head" onclick="openAgent('${k}')" title="View prompt &amp; role">
          <div class="a-av">${use(a.av)}</div>
          <div class="tn-tx">
@@ -103,9 +105,12 @@ function renderAgents(){
            <span class="tn-info">${use('panel')}</span>
          </div>
        </div>
-       <div class="tbranch">${leaves}</div>
-       ${k==='reconciliation'?`<button class="sop-link" onclick="event.stopPropagation();openPolicy()" title="The procedure this agent is told to follow">
-          ${use('book')}<span>The procedure it must follow</span>${use('arrow')}</button>`:''}
+       <div class="tdisc-row">
+         <button class="tdisc" onclick="toggleTools('${k}')" aria-expanded="true" title="Collapse this agent's tools">
+           <span class="td-ic">${use('arrow')}</span><span>${a.tools.length} tools</span>
+         </button>
+       </div>
+       <div class="tbranch">${leaves}${proc}</div>
      </div>`;
   };
   $('agent-list').innerHTML=
@@ -120,6 +125,9 @@ function setStat(k, state, txt){ const el=$('stat-'+k); if(!el) return;
 // collapse the agents rail into a focus mode so the chain-of-thought gets the full width
 function toggleRail(){ const g=document.querySelector('.grid'); const on=g.classList.toggle('rail-hidden');
   const b=$('railtog'); b.classList.toggle('on',on); b.title=on?'Show the agents panel':'Hide the agents panel'; }
+// an agent card keeps its tool list collapsed behind a "N tools" disclosure until opened
+function toggleTools(k){ const n=$('ac-'+k); if(!n) return; const open=n.classList.toggle('tools-open');
+  const b=n.querySelector('.tdisc'); if(b) b.setAttribute('aria-expanded',open); }
 
 // ---------- run lifecycle ----------
 function run(){
@@ -429,7 +437,6 @@ function loop(){ const v=VIS; if(!v) return; v.frame++;
 function renderMap(){
   $('journey').innerHTML=
     `<div class="hk">
-       <div class="hk-top"><span class="hk-title">RECON // reconciliation-agent — live</span></div>
        <div class="chain" id="chain"></div>
        <div class="hk-verdict" id="hk-verdict" hidden></div>
      </div>`;
@@ -469,9 +476,9 @@ function finish(d){
   $('btn-run').disabled=false; $('q').disabled=false; $('q').value=''; transport(false);
   setStat('orchestrator','','done'); setStat('reconciliation','','done');
   if(d.escaped){ if(mapWorld) mapWorld.breached=true; paintMap('escaped');
-    setStat('reconciliation','esc','escaped'); setStat('orchestrator','','halted');
-    $('run-pill').className='run-pill err'; $('run-txt').textContent='halted — escape';
-    verdict('breach','alert','Run halted by the platform', d.answer||''); }
+    setStat('reconciliation','esc','escaped'); setStat('orchestrator','','done');
+    $('run-pill').className='run-pill err'; $('run-txt').textContent='escape flagged';
+    verdict('breach','alert','Escape flagged by the platform', d.answer||''); }
   else if(d.error){ paintMap('error'); $('run-pill').className='run-pill err'; $('run-txt').textContent='error';
     verdict('err','x','Run failed', d.error); }
   else { paintMap('done'); $('run-pill').className='run-pill done'; $('run-txt').textContent='complete';
