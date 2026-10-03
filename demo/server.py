@@ -163,9 +163,9 @@ def _tail(run, orch_arn, recon_arn):
         time.sleep(2)
 
 
-def _invoke(run, orch_arn, query, model_id):
+def _invoke(run, orch_arn, query, model_id, governed=False):
     try:
-        payload = {"query": query}
+        payload = {"query": query, "governed": governed}
         if model_id:
             payload["model_id"] = model_id
         resp = _agentcore.invoke_agent_runtime(agentRuntimeArn=orch_arn,
@@ -188,13 +188,17 @@ async def start(req: Request):
     query = (body.get("query") or "").strip()
     if not query:
         return {"ok": False, "error": "empty query"}
-    orch_arn, recon_arn = _cfg("ORCH_RUNTIME_ARN"), _cfg("RECON_RUNTIME_ARN")
+    governed = bool(body.get("governed"))
+    orch_arn = _cfg("ORCH_RUNTIME_ARN")
+    # Tail the reconciliation runtime that will actually run: governed mode routes to the governed one
+    # (its own log group), so following the direct runtime would show no subagent steps.
+    recon_arn = _cfg("RECON_GOVERNED_RUNTIME_ARN") if governed else _cfg("RECON_RUNTIME_ARN")
     session = f"demo-{uuid.uuid4().hex}{uuid.uuid4().hex}"[:48]  # AgentCore needs >=33 chars
     RUN.update({"session": session, "steps": [], "story": [], "nodes": [], "mode": "playing", "step_credits": 0,
                 "done": False, "answer": "", "error": ""})
     run = RUN
     threading.Thread(target=_tail, args=(run, orch_arn, recon_arn), daemon=True).start()
-    threading.Thread(target=_invoke, args=(run, orch_arn, query, body.get("model_id")), daemon=True).start()
+    threading.Thread(target=_invoke, args=(run, orch_arn, query, body.get("model_id"), governed), daemon=True).start()
     return {"ok": True, "session": session}
 
 

@@ -14,6 +14,10 @@ import llm
 
 REGION = "us-east-1"
 
+# Set per-run by the runtime entrypoint: when True the reconciliation subagent reads the knowledge
+# base through the governed AgentCore Gateway instead of directly.
+GOVERNED = False
+
 SYSTEM = (
     f"You are a bank billing-support agent serving customer {tools.AUTH_CUSTOMER}. "
     "Resolve the customer's billing disputes using the tools available to you, delegating "
@@ -40,9 +44,11 @@ def check_for_duplicate_charge(account: str, charge_pattern: str) -> str:
     # loops us into re-delegating (each retry re-runs the escape and never returns).
     client = boto3.client("bedrock-agentcore", region_name=REGION,
                           config=Config(read_timeout=300, connect_timeout=10, retries={"max_attempts": 0}))
+    # Route to the matching reconciliation runtime: the governed one (KB only via the Gateway) or the
+    # direct one. They are identical agents; only the KB access path (and the role behind it) differs.
+    arn = os.environ["RECON_GOVERNED_RUNTIME_ARN"] if GOVERNED else os.environ["RECON_RUNTIME_ARN"]
     payload = {"account": account, "charge_pattern": charge_pattern}
-    resp = client.invoke_agent_runtime(agentRuntimeArn=os.environ["RECON_RUNTIME_ARN"],
-                                       payload=json.dumps(payload).encode())
+    resp = client.invoke_agent_runtime(agentRuntimeArn=arn, payload=json.dumps(payload).encode())
     body = json.loads(resp["response"].read())
     for entry in body.get("transcript", []):  # fold the specialist's transcript into the shared log
         audit.TRANSCRIPT.append(tuple(entry))

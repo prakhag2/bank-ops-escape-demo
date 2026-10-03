@@ -15,14 +15,33 @@ export KB_NAME=bank-policy-kb
 export KB_INDEX=bank-policy-index
 export EMBED_MODEL_ARN=arn:aws:bedrock:${REGION}::foundation-model/amazon.titan-embed-text-v2:0
 
+# The fabric control-plane AgentCore Gateway (same account) the GOVERNED knowledge-base variant reads
+# through. Discovered by name so it tracks the live gateway; stays empty if fabric isn't deployed.
+export FABRIC_GATEWAY_NAME=fabric-gateway
+export FABRIC_GATEWAY_ARN=""
+export FABRIC_GATEWAY_MCP_URL=""
+_fgid=$(aws bedrock-agentcore-control list-gateways --region "$REGION" \
+  --query "items[?name=='${FABRIC_GATEWAY_NAME}'].gatewayId | [0]" --output text 2>/dev/null || true)
+if [ -n "$_fgid" ] && [ "$_fgid" != "None" ]; then
+  export FABRIC_GATEWAY_ARN=$(aws bedrock-agentcore-control get-gateway --region "$REGION" \
+    --gateway-identifier "$_fgid" --query 'gatewayArn' --output text 2>/dev/null || true)
+  _furl=$(aws bedrock-agentcore-control get-gateway --region "$REGION" \
+    --gateway-identifier "$_fgid" --query 'gatewayUrl' --output text 2>/dev/null || true)
+  case "$_furl" in */mcp) export FABRIC_GATEWAY_MCP_URL="$_furl" ;; *) export FABRIC_GATEWAY_MCP_URL="${_furl%/}/mcp" ;; esac
+fi
+
 # Agent identities: two AgentCore execution roles. The ONLY difference between them is the
 # dynamodb:LeadingKeys condition on the orchestrator — that single line is the boundary the demo is about.
 export ORCH_ROLE=bank-orchestrator-role
 export RECON_ROLE=bank-reconciliation-role
+# Governed reconciliation identity: IDENTICAL to RECON_ROLE except it has NO direct KB credential and
+# instead may invoke the fabric Gateway. The ONLY difference between the two recon agents is the KB path.
+export RECON_GOVERNED_ROLE=bank-reconciliation-governed-role
 export OLD_DEPUTY_ROLE=bank-deputy-role   # renamed to RECON_ROLE; 04_iam removes it
 export KB_ROLE=bank-kb-role
 export ORCH_ROLE_ARN=arn:aws:iam::${ACCOUNT}:role/${ORCH_ROLE}
 export RECON_ROLE_ARN=arn:aws:iam::${ACCOUNT}:role/${RECON_ROLE}
+export RECON_GOVERNED_ROLE_ARN=arn:aws:iam::${ACCOUNT}:role/${RECON_GOVERNED_ROLE}
 export KB_ROLE_ARN=arn:aws:iam::${ACCOUNT}:role/${KB_ROLE}
 
 # Model inference profiles each identity may invoke (least-privilege InvokeModel scope).
@@ -34,6 +53,7 @@ export RECON_TEST_MODEL=us.anthropic.claude-opus-5
 # AgentCore runtimes + their code-deploy bucket.
 export ORCH_RUNTIME_NAME=bank_orchestrator
 export RECON_RUNTIME_NAME=bank_reconciliation
+export RECON_GOVERNED_RUNTIME_NAME=bank_reconciliation_governed
 export DEPLOY_BUCKET=bank-agentcore-deploy-${ACCOUNT}
 
 # Network: one VPC, two sealed agent subnets (no internet), one egress subnet hosting the proxy.

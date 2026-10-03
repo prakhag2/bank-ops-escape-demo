@@ -96,8 +96,10 @@ for svc in s3 dynamodb; do
   fi
 done
 
-# --- Interface endpoints: the only AWS the sealed runtimes can reach ---
-for svc in bedrock-runtime bedrock-agent-runtime bedrock-agentcore logs sts ec2; do
+# --- Interface endpoints: the only AWS the sealed runtimes can reach. bedrock-agentcore.gateway is the
+#     AgentCore Gateway data plane - its PrivateLink service, so the governed KB variant can reach the
+#     fabric Gateway (Cedar-scoped reads) from the sealed subnet without any internet route. ---
+for svc in bedrock-runtime bedrock-agent-runtime bedrock-agentcore bedrock-agentcore.gateway logs sts ec2; do
   eid=$(aws ec2 describe-vpc-endpoints \
     --filters "Name=vpc-id,Values=$VPC_ID" "Name=service-name,Values=com.amazonaws.${REGION}.${svc}" \
     --query 'VpcEndpoints[0].VpcEndpointId' --output text 2>/dev/null)

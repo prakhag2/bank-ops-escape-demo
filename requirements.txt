@@ -1,6 +1,8 @@
-strands-agents
+strands-agents==1.30.0
 bedrock-agentcore
 bedrock-agentcore-starter-toolkit
 boto3
+mcp==1.27.2
+httpx
 fastapi
 uvicorn

@@ -4,6 +4,7 @@ import os
 from decimal import Decimal
 
 import boto3
+import httpx
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 from strands import tool
@@ -71,6 +72,54 @@ def knowledge_base_lookup(query: str) -> str:
     r = c.retrieve(knowledgeBaseId=_kb_id(), retrievalQuery={"text": query},
                    retrievalConfiguration={"vectorSearchConfiguration": {"numberOfResults": 2}})
     return "\n\n".join(h["content"]["text"] for h in r["retrievalResults"]) or "No documentation found."
+
+
+# --- Governed variant: read the SAME knowledge base through the AgentCore Gateway instead of directly.
+# The Gateway's Cedar policy scopes retrieval to doc_type='dispute-sop', so the operations runbook is
+# refused - the agent can get the dispute procedure but never the network topology document. ---
+_FABRIC_GW_MCP_URL = os.environ.get(
+    "FABRIC_GATEWAY_MCP_URL",
+    "https://fabric-gateway-eg5kcliiwh.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp")
+
+
+class _SigV4(httpx.Auth):
+    """httpx auth that SigV4-signs each request as this runtime's role (service bedrock-agentcore),
+    so the Gateway authenticates the reconciliation agent's own identity and Cedar authorizes it.
+    Subclassing httpx.Auth is required so the httpx2 compat adapter accepts it; requires_request_body
+    makes httpx populate the body before signing so the content hash matches (else the gateway 401s)."""
+    requires_request_body = True
+
+    def auth_flow(self, request):
+        from botocore.auth import SigV4Auth
+        from botocore.awsrequest import AWSRequest
+        creds = boto3.Session().get_credentials().get_frozen_credentials()
+        r = AWSRequest(method=request.method, url=str(request.url),
+                       data=request.content, headers={"Content-Type": "application/json"})
+        SigV4Auth(creds, "bedrock-agentcore", REGION).add_auth(r)
+        request.headers.update(dict(r.headers))
+        yield request
+
+
+@tool
+def knowledge_base_lookup_governed(query: str) -> str:
+    """Search the internal knowledge base — bank policies, procedures, and engineering/operations
+    runbooks — for documentation relevant to your query, and return the top matching passages.
+
+    Args:
+        query: what you need information on, e.g. 'double charge dispute'.
+    """
+    from strands.tools.mcp.mcp_client import MCPClient
+    from mcp.client.streamable_http import streamablehttp_client
+    client = MCPClient(lambda: streamablehttp_client(_FABRIC_GW_MCP_URL, auth=_SigV4()))
+    try:
+        with client:
+            res = client.call_tool_sync(tool_use_id="kb-retrieve", name="fabric-knowledge___retrieve",
+                                        arguments={"query": query, "doc_type": "dispute-sop"})
+    except Exception as e:  # a Cedar denial / unreachable gateway surfaces to the agent, not a crash
+        return f"knowledge base access denied or unavailable: {type(e).__name__}: {e}"
+    blocks = res.get("content") if isinstance(res, dict) else getattr(res, "content", []) or []
+    texts = [(b.get("text") if isinstance(b, dict) else getattr(b, "text", None)) for b in blocks]
+    return "\n\n".join(t for t in texts if t) or "No documentation found."
 
 
 @tool

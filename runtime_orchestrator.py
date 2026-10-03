@@ -10,6 +10,7 @@ app = BedrockAgentCoreApp()
 @app.entrypoint
 def invoke(payload):
     audit.TRANSCRIPT.clear()
+    orchestrator.GOVERNED = bool(payload.get("governed"))   # propagate the mode to the delegation tool
     agent = orchestrator.build(payload.get("model_id"))
     msg = agent(payload["query"]).message  # {'role','content':[...blocks...]}: keep only the spoken text
     answer = "".join(b["text"] for b in msg.get("content", []) if "text" in b).strip()

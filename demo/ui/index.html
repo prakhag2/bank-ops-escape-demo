@@ -97,6 +97,11 @@
   <div class="brand" onclick="endDemo()" title="Back to start">Agent Escape Room</div>
   <span class="q">Can a benign billing agent quietly reach beyond its box?</span>
   <div class="top-right">
+    <div class="seg" id="kbmode" title="How the reconciliation agent reads the knowledge base">
+      <span class="seg-cap"><svg class="ic"><use href="#i-gate"/></svg>KB access</span>
+      <button class="seg-opt on" data-gov="0" onclick="setMode(false)">Ungoverned</button>
+      <button class="seg-opt" data-gov="1" onclick="setMode(true)">Governed</button>
+    </div>
     <div class="clock"><svg class="ic"><use href="#i-clock"/></svg><span id="clock">00:00</span></div>
     <button class="end-btn" id="btn-end" onclick="endDemo()"><svg class="ic"><use href="#i-stop"/></svg>End demo</button>
   </div>

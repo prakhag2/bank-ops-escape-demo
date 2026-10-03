@@ -105,6 +105,21 @@ code{font-family:var(--mono)}
 .end-btn:hover{border-color:var(--line-2);filter:brightness(1.12)}
 .end-btn:disabled{opacity:.45;cursor:default}
 body.idle .end-btn{opacity:.45;pointer-events:none}
+/* KB-access segmented control (top bar): the reconciliation agent's KB path — ungoverned (direct) vs
+   governed (through the AgentCore Gateway, Cedar-scoped). Active segment is tinted by meaning. */
+.seg{display:inline-flex;align-items:center;gap:4px;height:34px;padding:3px;border:1px solid var(--line);
+  border-radius:10px;background:var(--surface-2);box-shadow:var(--sh-sm)}
+.seg-cap{display:inline-flex;align-items:center;gap:5px;padding:0 9px 0 8px;
+  font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+  border-right:1px solid var(--line);white-space:nowrap}
+.seg-cap .ic{font-size:14px;color:var(--muted)}
+.seg-opt{appearance:none;border:0;background:transparent;cursor:pointer;padding:5px 13px;border-radius:7px;
+  font:inherit;font-size:12.5px;font-weight:600;color:var(--muted);transition:color .15s,background .15s}
+.seg-opt:hover{color:var(--ink)}
+.seg-opt.on{background:var(--surface);box-shadow:var(--sh-sm)}
+.seg-opt.on[data-gov="0"]{color:var(--warn)}
+.seg-opt.on[data-gov="1"]{color:var(--ok)}
+.seg.locked{opacity:.5;pointer-events:none}
 
 /* ===================== grid ===================== */
 .grid{position:relative;z-index:1;flex:1;min-height:0;display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px 18px;transition:grid-template-columns .32s ease,gap .32s ease}

@@ -102,9 +102,11 @@ aws iam put-role-policy --role-name "$ORCH_ROLE" --policy-name exec --policy-doc
 aws iam delete-role-policy --role-name "$ORCH_ROLE" --policy-name ledger-scoped 2>/dev/null || true
 echo "role $ORCH_ROLE ready (LeadingKeys-scoped to $AUTH_CUSTOMER)"
 
-# --- Reconciliation identity: same ledger, same actions, NO LeadingKeys condition. This is the gap. ---
-upsert_role "$RECON_ROLE" "$T/agentcore-trust.json"
-{
+# --- Reconciliation identities: same ledger, same actions, NO LeadingKeys condition (the gap). TWO
+#     identical roles differing ONLY in KB access: the direct role reaches the KB directly (bedrock:Retrieve
+#     is granted in 06_bedrock_kb.sh); the governed role has NO direct KB credential and instead may invoke
+#     the fabric Gateway, so its ONLY path to the KB is the Cedar-governed gateway tool. ---
+recon_exec_policy () {  # arg1: "gateway" to include InvokeGateway instead of nothing
   echo '{"Version":"2012-10-17","Statement":['
   baseline_stmts "arn:aws:bedrock:${REGION}:${ACCOUNT}:inference-profile/${RECON_MODEL}" \
                  "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8*"
@@ -118,11 +120,23 @@ upsert_role "$RECON_ROLE" "$T/agentcore-trust.json"
  {"Sid":"AnyAccount","Effect":"Allow","Action":["dynamodb:Query","dynamodb:GetItem"],
   "Resource":"$LED_ARN"},
  {"Sid":"Ec2ReadOnly","Effect":"Allow","Action":["ec2:Describe*"],"Resource":"*"}
-]}
 JSON
-} > "$T/recon-policy.json"
+  [ "$1" = gateway ] && cat <<JSON
+ ,{"Sid":"InvokeFabricGateway","Effect":"Allow","Action":"bedrock-agentcore:InvokeGateway",
+  "Resource":"${FABRIC_GATEWAY_ARN}"}
+JSON
+  echo "]}"
+}
+
+upsert_role "$RECON_ROLE" "$T/agentcore-trust.json"
+recon_exec_policy "" > "$T/recon-policy.json"
 aws iam put-role-policy --role-name "$RECON_ROLE" --policy-name exec --policy-document "file://$T/recon-policy.json"
-echo "role $RECON_ROLE ready (no ownership condition — the confused-deputy gap)"
+echo "role $RECON_ROLE ready (direct KB access; no ownership condition — the confused-deputy gap)"
+
+upsert_role "$RECON_GOVERNED_ROLE" "$T/agentcore-trust.json"
+recon_exec_policy gateway > "$T/recon-gov-policy.json"
+aws iam put-role-policy --role-name "$RECON_GOVERNED_ROLE" --policy-name exec --policy-document "file://$T/recon-gov-policy.json"
+echo "role $RECON_GOVERNED_ROLE ready (NO direct KB; KB only via the fabric Gateway)"
 
 # Rename cleanup: the old assume-role deputy role is superseded by the reconciliation execution role.
 delete_role "$OLD_DEPUTY_ROLE"

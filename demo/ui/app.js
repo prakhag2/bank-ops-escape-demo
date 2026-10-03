@@ -69,6 +69,12 @@ const AGENTS={
 // let a step collapse into the node before it when it's the same tool on the same target.
 let es=null, seen=new Set(), running=false, timer=null, t0=0,
     stepData={}, groups={}, lastSig=null, lastIdx=null, mapWorld=null;
+// KB read path for the reconciliation agent: false = ungoverned (direct KB, leaks the net runbook);
+// true = governed (through the AgentCore Gateway, Cedar scopes reads to the dispute SOP). Locked mid-run.
+let governed=false;
+function setMode(g){ if(running) return; governed=g;
+  document.querySelectorAll('#kbmode .seg-opt').forEach(b=>b.classList.toggle('on', (b.dataset.gov==='1')===g)); }
+function lockMode(on){ const m=$('kbmode'); if(m) m.classList.toggle('locked', on); }
 // fixed lifeline icons for the known agents; systems the subagent discovers use the icon the director picks
 const ACTOR_IC={customer:'user', you:'user', orchestrator:'headset', reconciliation:'inspect'};
 
@@ -132,7 +138,7 @@ function toggleTools(k){ const n=$('ac-'+k); if(!n) return; const open=n.classLi
 // ---------- run lifecycle ----------
 function run(){
   const q=$('q').value.trim(); if(!q||running) return;
-  running=true; seen=new Set(); stepData={}; groups={}; lastSig=null; lastIdx=null; mapWorld=freshWorld();
+  running=true; lockMode(true); seen=new Set(); stepData={}; groups={}; lastSig=null; lastIdx=null; mapWorld=freshWorld();
   document.body.classList.remove('idle');
   $('alert-pill').hidden=true; renderMap();
   setStat('orchestrator','run','running'); setStat('reconciliation','run','running');
@@ -140,7 +146,7 @@ function run(){
   $('btn-run').disabled=true; $('q').disabled=true; transport(true);
   startClock();
   if(es) es.close();
-  fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})})
+  fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,governed})})
     .then(r=>r.json()).then(d=>{ if(!d.ok){fail(d.error||'failed to start');return;} openStream(); })
     .catch(e=>fail(String(e)));
 }
@@ -153,7 +159,7 @@ function openStream(){
 function endDemo(){
   if(es) es.close();
   fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'stop'})}).catch(()=>{});
-  running=false; stopClock(); $('clock').textContent='00:00';
+  running=false; lockMode(false); stopClock(); $('clock').textContent='00:00';
   document.body.classList.add('idle');
   $('landing').classList.remove('gone');   // back to start = the intro screen
   groups={}; lastSig=null; lastIdx=null; mapWorld=freshWorld(); renderMap(); $('alert-pill').hidden=true;
@@ -472,7 +478,7 @@ function paintMap(status){
 }
 // ---------- finish / fail ----------
 function finish(d){
-  running=false; if(es) es.close(); stopClock();
+  running=false; lockMode(false); if(es) es.close(); stopClock();
   $('btn-run').disabled=false; $('q').disabled=false; $('q').value=''; transport(false);
   setStat('orchestrator','','done'); setStat('reconciliation','','done');
   if(d.escaped){ if(mapWorld) mapWorld.breached=true; paintMap('escaped');

@@ -21,11 +21,14 @@ _SYSTEM = (
 )
 
 
-def build(model_id=None):
+def build(model_id=None, governed=False):
+    # governed=True reads the knowledge base through the AgentCore Gateway (Cedar scopes it to the
+    # dispute SOP); governed=False reads it directly (the ungoverned path that leaks the net runbook).
+    kb = tools.knowledge_base_lookup_governed if governed else tools.knowledge_base_lookup
     return Agent(
         model=llm.model(model_id or llm.DEPUTY_MODEL),
         system_prompt=_SYSTEM,
-        tools=[tools.ledger_read_any, tools.analyze_transactions, tools.knowledge_base_lookup],
+        tools=[tools.ledger_read_any, tools.analyze_transactions, kb],
         hooks=[audit.AuditLogger()],
         name="reconciliation",
     )

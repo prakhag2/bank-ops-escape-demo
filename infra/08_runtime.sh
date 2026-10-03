@@ -37,14 +37,25 @@ PKG=$(mktemp -d)
 cp "$ROOT"/*.py "$ROOT"/requirements.txt "$PKG"/
 cd "$PKG"
 
-# --- Reconciliation runtime (sealed subnets, its own broad-read identity) ---
+# --- Reconciliation runtime (DIRECT): sealed subnets, direct-KB identity, reads the KB directly. ---
 agentcore configure -e runtime_reconciliation.py -n "$RECON_RUNTIME_NAME" \
   -er "$RECON_ROLE_ARN" -s3 "$DEPLOY_BUCKET" -rf requirements.txt \
   -dt direct_code_deploy --vpc --subnets "$AGENT_SUBNET_A,$AGENT_SUBNET_B" \
   --security-groups "$AGENT_SG" -dm -do -r "$REGION" -ni
 agentcore launch -a "$RECON_RUNTIME_NAME" --auto-update-on-conflict --env "KB_ID=$KB_ID"
 RECON_RUNTIME_ARN=$(runtime_arn "$RECON_RUNTIME_NAME")
-echo "reconciliation runtime: $RECON_RUNTIME_ARN"
+echo "reconciliation runtime (direct): $RECON_RUNTIME_ARN"
+
+# --- Reconciliation runtime (GOVERNED): IDENTICAL agent/code/subnets, but its role has NO direct KB
+#     credential; its only KB path is the fabric Gateway (RECON_GOVERNED=1 selects the governed KB tool). ---
+agentcore configure -e runtime_reconciliation.py -n "$RECON_GOVERNED_RUNTIME_NAME" \
+  -er "$RECON_GOVERNED_ROLE_ARN" -s3 "$DEPLOY_BUCKET" -rf requirements.txt \
+  -dt direct_code_deploy --vpc --subnets "$AGENT_SUBNET_A,$AGENT_SUBNET_B" \
+  --security-groups "$AGENT_SG" -dm -do -r "$REGION" -ni
+agentcore launch -a "$RECON_GOVERNED_RUNTIME_NAME" --auto-update-on-conflict \
+  --env "RECON_GOVERNED=1" --env "FABRIC_GATEWAY_MCP_URL=$FABRIC_GATEWAY_MCP_URL"
+RECON_GOVERNED_RUNTIME_ARN=$(runtime_arn "$RECON_GOVERNED_RUNTIME_NAME")
+echo "reconciliation runtime (governed): $RECON_GOVERNED_RUNTIME_ARN"
 
 # --- Orchestrator runtime (sealed subnets, customer-scoped identity; told the recon ARN + KB) ---
 agentcore configure -e runtime_orchestrator.py -n "$ORCH_RUNTIME_NAME" \
@@ -52,7 +63,8 @@ agentcore configure -e runtime_orchestrator.py -n "$ORCH_RUNTIME_NAME" \
   -dt direct_code_deploy --vpc --subnets "$AGENT_SUBNET_A,$AGENT_SUBNET_B" \
   --security-groups "$AGENT_SG" -dm -do -r "$REGION" -ni
 agentcore launch -a "$ORCH_RUNTIME_NAME" --auto-update-on-conflict \
-  --env "RECON_RUNTIME_ARN=$RECON_RUNTIME_ARN" --env "KB_ID=$KB_ID"
+  --env "RECON_RUNTIME_ARN=$RECON_RUNTIME_ARN" \
+  --env "RECON_GOVERNED_RUNTIME_ARN=$RECON_GOVERNED_RUNTIME_ARN" --env "KB_ID=$KB_ID"
 ORCH_RUNTIME_ARN=$(runtime_arn "$ORCH_RUNTIME_NAME")
 echo "orchestrator runtime: $ORCH_RUNTIME_ARN"
 
@@ -64,13 +76,15 @@ T=$(mktemp -d)
 cat > "$T/invoke.json" <<JSON
 {"Version":"2012-10-17","Statement":[{"Sid":"InvokeRecon","Effect":"Allow",
  "Action":["bedrock-agentcore:InvokeAgentRuntime"],
- "Resource":["$RECON_RUNTIME_ARN","$RECON_RUNTIME_ARN/*"]}]}
+ "Resource":["$RECON_RUNTIME_ARN","$RECON_RUNTIME_ARN/*",
+  "$RECON_GOVERNED_RUNTIME_ARN","$RECON_GOVERNED_RUNTIME_ARN/*"]}]}
 JSON
 aws iam put-role-policy --role-name "$ORCH_ROLE" --policy-name invoke-recon --policy-document "file://$T/invoke.json"
 rm -rf "$T"
-echo "granted $ORCH_ROLE InvokeAgentRuntime on reconciliation runtime"
+echo "granted $ORCH_ROLE InvokeAgentRuntime on both reconciliation runtimes"
 
-{ echo "ORCH_RUNTIME_ARN=$ORCH_RUNTIME_ARN"; echo "RECON_RUNTIME_ARN=$RECON_RUNTIME_ARN"; } > "$STATE_FILE.tmp"
-grep -v -E '^(ORCH_RUNTIME_ARN|RECON_RUNTIME_ARN)=' "$STATE_FILE" 2>/dev/null >> "$STATE_FILE.tmp" || true
+{ echo "ORCH_RUNTIME_ARN=$ORCH_RUNTIME_ARN"; echo "RECON_RUNTIME_ARN=$RECON_RUNTIME_ARN";
+  echo "RECON_GOVERNED_RUNTIME_ARN=$RECON_GOVERNED_RUNTIME_ARN"; } > "$STATE_FILE.tmp"
+grep -v -E '^(ORCH_RUNTIME_ARN|RECON_RUNTIME_ARN|RECON_GOVERNED_RUNTIME_ARN)=' "$STATE_FILE" 2>/dev/null >> "$STATE_FILE.tmp" || true
 mv "$STATE_FILE.tmp" "$STATE_FILE"
 echo "runtimes deployed"
