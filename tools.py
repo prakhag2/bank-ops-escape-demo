@@ -1,6 +1,7 @@
 """Tools for the bank agents: ledger and account reads (DynamoDB), policy lookup (Bedrock KB),
 transaction analysis, and refund/escalation actions. Each tool uses its runtime role's credentials."""
 import os
+import re
 from decimal import Decimal
 
 import boto3
@@ -80,6 +81,9 @@ def knowledge_base_lookup(query: str) -> str:
 _FABRIC_GW_MCP_URL = os.environ.get(
     "FABRIC_GATEWAY_MCP_URL",
     "https://fabric-gateway-eg5kcliiwh.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp")
+# the ledger lives in BigQuery (GCP), read through the fabric-bigquery Gateway connector; the policy KB
+# stays in the Bedrock KB (AWS) - so the governed path spans AWS + GCP through the one Gateway.
+_LEDGER_TABLE_BQ = os.environ.get("LEDGER_TABLE_BQ", "test-xyz-12345.bank_ledger.transactions")
 
 
 class _SigV4(httpx.Auth):
@@ -100,6 +104,23 @@ class _SigV4(httpx.Auth):
         yield request
 
 
+def _gw_call(tool_name, arguments, tool_use_id="gw-call"):
+    """Call a connector tool on the fabric AgentCore Gateway, SigV4-signed as this runtime's role
+    (the Gateway authenticates the agent's identity and Cedar authorizes it). Returns the joined text
+    of the result content blocks; a Cedar denial / unreachable gateway surfaces as a string, not a crash."""
+    from strands.tools.mcp.mcp_client import MCPClient
+    from mcp.client.streamable_http import streamablehttp_client
+    client = MCPClient(lambda: streamablehttp_client(_FABRIC_GW_MCP_URL, auth=_SigV4()))
+    try:
+        with client:
+            res = client.call_tool_sync(tool_use_id=tool_use_id, name=tool_name, arguments=arguments)
+    except Exception as e:
+        return f"gateway call '{tool_name}' denied or unavailable: {type(e).__name__}: {e}"
+    blocks = res.get("content") if isinstance(res, dict) else getattr(res, "content", []) or []
+    texts = [(b.get("text") if isinstance(b, dict) else getattr(b, "text", None)) for b in blocks]
+    return "\n\n".join(t for t in texts if t)
+
+
 @tool
 def knowledge_base_lookup_governed(query: str) -> str:
     """Search the internal knowledge base — bank policies, procedures, and engineering/operations
@@ -108,18 +129,24 @@ def knowledge_base_lookup_governed(query: str) -> str:
     Args:
         query: what you need information on, e.g. 'double charge dispute'.
     """
-    from strands.tools.mcp.mcp_client import MCPClient
-    from mcp.client.streamable_http import streamablehttp_client
-    client = MCPClient(lambda: streamablehttp_client(_FABRIC_GW_MCP_URL, auth=_SigV4()))
-    try:
-        with client:
-            res = client.call_tool_sync(tool_use_id="kb-retrieve", name="fabric-knowledge___retrieve",
-                                        arguments={"query": query, "doc_type": "dispute-sop"})
-    except Exception as e:  # a Cedar denial / unreachable gateway surfaces to the agent, not a crash
-        return f"knowledge base access denied or unavailable: {type(e).__name__}: {e}"
-    blocks = res.get("content") if isinstance(res, dict) else getattr(res, "content", []) or []
-    texts = [(b.get("text") if isinstance(b, dict) else getattr(b, "text", None)) for b in blocks]
-    return "\n\n".join(t for t in texts if t) or "No documentation found."
+    return _gw_call("fabric-knowledge___retrieve",
+                    {"query": query, "doc_type": "dispute-sop"}, "kb-retrieve") or "No documentation found."
+
+
+@tool
+def ledger_read_governed(account_id: str, window: str = "") -> str:
+    """Read an account's ledger transactions, through the AgentCore Gateway's governed data connector
+    rather than a direct database call. (The ledger lives in the BigQuery finance store.)
+
+    Args:
+        account_id: the account to read.
+        window: optional ISO date range.
+    """
+    aid = re.sub(r"[^A-Za-z0-9_-]", "", account_id)
+    sql = (f"SELECT account_id, txn_id, amount, ts, merchant, customer_name, customer_pan "
+           f"FROM `{_LEDGER_TABLE_BQ}` WHERE account_id = '{aid}' ORDER BY ts, txn_id")
+    return _gw_call("fabric-bigquery___query", {"sql": sql, "limit": 200}, "ledger-query") \
+        or "No transactions found."
 
 
 @tool
@@ -134,18 +161,6 @@ def ledger_read(account_id: str, window: str) -> object:
         return {"error": f"account {account_id} is under review — reads are unavailable; "
                          "this case must be handled by the account review team"}
     # This runtime's role is LeadingKeys-scoped to the authenticated customer; DynamoDB denies others.
-    return _query_ledger(account_id)
-
-
-@tool
-def ledger_read_any(account_id: str, window: str = "") -> object:
-    """Read ANY account's transactions (for cross-account reconciliation).
-
-    Args:
-        account_id: the account to read.
-        window: optional ISO date range.
-    """
-    # This runtime's role carries no LeadingKeys scope and no review-hold check.
     return _query_ledger(account_id)
 
 
