@@ -183,6 +183,14 @@ function endDemo(){
   $('btn-run').disabled=false; $('q').disabled=false; $('q').value=''; transport(false);
   closeDrawer();
 }
+// Clear the panel output (step timeline + map) without ending the demo or clearing the input. Resets the
+// same view state run() does; if a run is live, the stream simply repopulates the fresh canvas.
+function clearPanel(){
+  seen=new Set(); stepData={}; groups={}; lastSig=null; lastIdx=null; mapWorld=freshWorld();
+  renderMap();
+  $('alert-pill').hidden=true; $('alert-txt').textContent='0 out of bounds';
+  closeDrawer();
+}
 
 // ---------- reveal one step ----------
 function onStep(s){

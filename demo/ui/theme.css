@@ -216,6 +216,9 @@ body.idle .end-btn{opacity:.45;pointer-events:none}
   display:grid;place-items:center;font-size:14px;color:var(--muted);transition:.14s;box-shadow:var(--bevel),var(--sh-sm)}
 .mini:hover:not(:disabled){color:var(--ink);filter:brightness(1.15)}
 .mini:disabled{opacity:.4;cursor:default;box-shadow:none}
+.clearbtn{width:auto;gap:6px;padding:0 11px;display:inline-flex;align-items:center;font-size:11px;
+  font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.clearbtn .ic{width:13px;height:13px}
 .run-pill{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:var(--muted);
   text-transform:uppercase;letter-spacing:.04em;padding:6px 12px;border:1px solid var(--line);border-radius:99px;background:var(--metal-2);box-shadow:var(--bevel)}
 .run-pill .rp-dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
