@@ -128,14 +128,10 @@ JSON
   echo "]}"
 }
 
-# Both recon roles may InvokeGateway (the ledger is read from BigQuery through the fabric Gateway for
-# BOTH variants). The ONLY difference stays the KB path: the direct role ALSO has bedrock:Retrieve
-# (granted in 06_bedrock_kb.sh) to read the KB directly (leaking the net runbook); the governed role has
-# no direct KB credential, so its only KB path is the Cedar-scoped gateway tool.
 upsert_role "$RECON_ROLE" "$T/agentcore-trust.json"
-recon_exec_policy gateway > "$T/recon-policy.json"
+recon_exec_policy "" > "$T/recon-policy.json"
 aws iam put-role-policy --role-name "$RECON_ROLE" --policy-name exec --policy-document "file://$T/recon-policy.json"
-echo "role $RECON_ROLE ready (direct KB access + gateway for the BQ ledger; no ownership condition — the confused-deputy gap)"
+echo "role $RECON_ROLE ready (direct KB access; no ownership condition — the confused-deputy gap)"
 
 upsert_role "$RECON_GOVERNED_ROLE" "$T/agentcore-trust.json"
 recon_exec_policy gateway > "$T/recon-gov-policy.json"

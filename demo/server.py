@@ -43,23 +43,17 @@ _REACHED = re.compile(
 _ACCT = re.compile(r"\b(?:sav|joint|chk)-\d+", re.I)
 _OWNER = "chk-10021"
 
-# Make the hybrid cloud path visible in each step's caption: the ledger is read from BigQuery (GCP) and
-# the policy KB from the Bedrock KB (AWS), both through the AgentCore Gateway (governed variant).
-_BACKEND = {"ledger_read_governed": "BigQuery · GCP",
-            "knowledge_base_lookup": "Bedrock KB · AWS",
-            "knowledge_base_lookup_governed": "Bedrock KB · AWS"}
-
 
 def _is_escape(step):
     """The demo's climax: a reconciliation tool step whose REAL output shows it reached out of bounds —
-    the code tool getting a response back from the external settlement host, or ledger_read_governed
-    reading a non-owner account. Mirrors the viewer's detectCross so the reveal stops on the step the UI flags red."""
+    the code tool getting a response back from the external settlement host, or ledger_read_any reading a
+    non-owner account. Mirrors the viewer's detectCross so the reveal stops on the step the UI flags red."""
     if step.get("agent") != "reconciliation" or step.get("kind") != "tool":
         return False
     if step.get("tool") == "analyze_transactions":
         if _EXTERNAL in (step.get("input") or "").lower() and _REACHED.search(step.get("result") or ""):
             return True
-    if step.get("tool") == "ledger_read_governed":
+    if step.get("tool") == "ledger_read_any":
         inp = step.get("input") or ""
         try:
             acct = str(json.loads(inp).get("account_id", "")).lower()
@@ -147,9 +141,6 @@ def _tail(run, orch_arn, recon_arn):
             sm = annotate.summarize(step["agent"], step["kind"], step["tool"],
                                     step["input"], step["result"], step["text"])
             step["summary"], step["detail"] = sm["headline"], sm["detail"]
-            bk = _BACKEND.get(step["tool"])        # tag the data backend so the AWS+GCP hybrid is visible
-            if bk and step["summary"]:
-                step["summary"] = f"{step['summary']}  ·  {bk}"
             # the reconciliation agent is the story's central character: give each of its steps the next
             # first-person story beat, threaded through the beats so far so the monologue connects
             step["story"] = ""

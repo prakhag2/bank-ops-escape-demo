@@ -29,14 +29,40 @@ Two agents, each deployed as its own AgentCore runtime under its own execution r
 
 | | Orchestrator | Reconciliation subagent |
 |---|---|---|
-| Role | Customer-facing | Internal specialist |
-| Ledger access | **Pinned to the authenticated customer** (`dynamodb:LeadingKeys` condition) | Any account (no such condition) |
+| Role | Customer-facing | Internal specialist (two variants: **governed** / **ungoverned**) |
+| Ledger access | **Pinned to the authenticated customer** (`dynamodb:LeadingKeys`) | Any account, from **DynamoDB** (no such condition) |
+| Policy KB | — | **Bedrock KB** — *governed:* via the AgentCore Gateway, Cedar-scoped to the dispute SOP; *ungoverned:* read directly (leaks the network runbook) |
 | Network | Sealed subnet, no internet | Sealed subnet, no internet — *but a reachable proxy next door* |
 | Tools | ledger read, delegate, propose refund | ledger read (any), a Python code tool, knowledge-base lookup |
 
-**The authorization boundary is a single line of IAM.** The two roles are identical except that the
-orchestrator's ledger permission carries a `dynamodb:LeadingKeys` condition pinning it to the logged-in
-customer; the reconciliation role has no such condition. (`infra/04_iam.sh`)
+Everything runs in **AWS**: the ledger is in **DynamoDB**, the policy SOP in a **Bedrock knowledge base**.
+
+**The governance variable is the KB path.** The two reconciliation runtimes are byte-for-byte identical
+except for how they reach the knowledge base — toggle them in the viewer (**KB: Gateway | Direct**). The
+**governed** one reaches the Bedrock KB *through the AgentCore Gateway*, where Cedar scopes retrieval to
+the dispute SOP, so the **network runbook is never returned**. The **ungoverned** one reads the KB
+directly (`bedrock:Retrieve`) and gets the runbook that spells out the egress path. The two execution
+roles differ only there — the ungoverned role has `bedrock:Retrieve`, the governed role instead has
+`InvokeGateway`. Both read the ledger directly from DynamoDB; the orchestrator's ledger read is
+additionally pinned to the logged-in customer by a `dynamodb:LeadingKeys` condition, the reconciliation
+role is not. (`infra/04_iam.sh`, `reconciliation_agent.py`, `tools.py`)
+
+> **The governed path reuses a pre-existing AgentCore Gateway — this repo does not provision it.**
+> "Governed" reaches the KB through an AgentCore Gateway that fronts this demo's Bedrock KB as a tool
+> target, under a Cedar policy that scopes KB retrieval to `doc_type == 'dispute-sop'` (so the network
+> runbook is refused). `infra/config.sh` auto-discovers that gateway by name and passes its MCP URL to the
+> governed runtime at deploy; nothing in `run_all.sh` creates the gateway.
+>
+> **To create / replicate that setup:** (1) create an AgentCore Gateway in this account; (2) register this
+> demo's Bedrock KB on it as an MCP tool target exposing a `retrieve` tool that takes `query` + `doc_type`;
+> (3) attach a Cedar policy to the gateway's policy engine that **forbids the KB retrieve tool unless
+> `context.input.doc_type == "dispute-sop"`**; and grant the governed runtime's execution role
+> `bedrock-agentcore:InvokeGateway` (04_iam.sh already does this). Then point the discovery name in
+> `infra/config.sh` and the KB tool name in `tools.py` at your gateway + tool.
+>
+> The **ungoverned** path needs none of this — `infra/run_all.sh` alone stands it up (DynamoDB + a direct
+> Bedrock KB). If the gateway is absent, the governed variant's KB lookup fails gracefully (the error
+> surfaces to the agent) and the ungoverned toggle still demonstrates the escape.
 
 **The network is the escape route.** Both agent subnets are sealed — their route table has no path to
 an internet gateway; AWS APIs are reached only through VPC endpoints. A separate egress subnet holds a
@@ -66,6 +92,9 @@ and the run is halted there with a "stopped by the platform, no refund issued" r
   and AgentCore available. All resources are created in `us-east-1`.
 - AWS credentials in the environment (the setup runs as an admin/back-office identity).
 - Python 3.11+.
+- *(Governed variant only)* A **pre-existing AgentCore Gateway** in the same account that fronts this
+  demo's Bedrock KB as a Cedar-scoped tool target — this repo does **not** provision it; see "The governed
+  path" under *How it's built* for how to create it. The **ungoverned** variant needs no gateway.
 
 ```bash
 python -m venv venv && source venv/bin/activate

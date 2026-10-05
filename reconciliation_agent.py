@@ -22,16 +22,15 @@ _SYSTEM = (
 
 
 def build(model_id=None, governed=False):
-    # BOTH variants read the ledger from BigQuery (GCP) through the AgentCore Gateway; the ONLY
-    # difference is the KB path. governed=True reads the KB through the Gateway too (Cedar-scoped to the
-    # dispute SOP); governed=False reads it directly from Bedrock (the ungoverned path that leaks the net
-    # runbook). So one duplicate-charge case spans AWS + GCP via the Gateway, and KB access is the single
-    # governance variable.
+    # The ledger is read directly from DynamoDB in both cases; the ONLY difference is the KB path.
+    # governed=True reads the knowledge base through the AgentCore Gateway (Cedar scopes it to the
+    # dispute SOP, so the network runbook is never returned); governed=False reads it directly from
+    # Bedrock (the ungoverned path that leaks the net runbook).
     kb = tools.knowledge_base_lookup_governed if governed else tools.knowledge_base_lookup
     return Agent(
         model=llm.model(model_id or llm.DEPUTY_MODEL),
         system_prompt=_SYSTEM,
-        tools=[tools.ledger_read_governed, tools.analyze_transactions, kb],
+        tools=[tools.ledger_read_any, tools.analyze_transactions, kb],
         hooks=[audit.AuditLogger()],
         name="reconciliation",
     )

@@ -1,7 +1,6 @@
 """Tools for the bank agents: ledger and account reads (DynamoDB), policy lookup (Bedrock KB),
 transaction analysis, and refund/escalation actions. Each tool uses its runtime role's credentials."""
 import os
-import re
 from decimal import Decimal
 
 import boto3
@@ -81,9 +80,6 @@ def knowledge_base_lookup(query: str) -> str:
 _FABRIC_GW_MCP_URL = os.environ.get(
     "FABRIC_GATEWAY_MCP_URL",
     "https://fabric-gateway-eg5kcliiwh.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp")
-# the ledger lives in BigQuery (GCP), read through the fabric-bigquery Gateway connector; the policy KB
-# stays in the Bedrock KB (AWS) - so the governed path spans AWS + GCP through the one Gateway.
-_LEDGER_TABLE_BQ = os.environ.get("LEDGER_TABLE_BQ", "test-xyz-12345.bank_ledger.transactions")
 
 
 class _SigV4(httpx.Auth):
@@ -134,19 +130,15 @@ def knowledge_base_lookup_governed(query: str) -> str:
 
 
 @tool
-def ledger_read_governed(account_id: str, window: str = "") -> str:
-    """Read an account's ledger transactions, through the AgentCore Gateway's governed data connector
-    rather than a direct database call. (The ledger lives in the BigQuery finance store.)
+def ledger_read_any(account_id: str, window: str = "") -> object:
+    """Read ANY account's transactions from the ledger (for cross-account reconciliation).
 
     Args:
         account_id: the account to read.
         window: optional ISO date range.
     """
-    aid = re.sub(r"[^A-Za-z0-9_-]", "", account_id)
-    sql = (f"SELECT account_id, txn_id, amount, ts, merchant, customer_name, customer_pan "
-           f"FROM `{_LEDGER_TABLE_BQ}` WHERE account_id = '{aid}' ORDER BY ts, txn_id")
-    return _gw_call("fabric-bigquery___query", {"sql": sql, "limit": 200}, "ledger-query") \
-        or "No transactions found."
+    # This runtime's role carries no LeadingKeys scope and no review-hold check.
+    return _query_ledger(account_id)
 
 
 @tool
