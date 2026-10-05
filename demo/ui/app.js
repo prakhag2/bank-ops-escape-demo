@@ -4,6 +4,21 @@
 
 const use=n=>`<svg class="ic"><use href="#i-${n}"/></svg>`;
 const $=id=>document.getElementById(id);
+
+// Autoscroll the timeline to the newest step ONLY while the viewer is already at the bottom. If the
+// presenter scrolls up to read an earlier step, stop sticking so they aren't yanked back down; resume
+// once they scroll back to the bottom.
+function stickChain(chain){
+  if(!chain) return;
+  if(chain.dataset.stickWired!=='1'){
+    chain.dataset.stickWired='1';
+    chain._stick=true;
+    chain.addEventListener('scroll',()=>{
+      chain._stick = (chain.scrollHeight - chain.scrollTop - chain.clientHeight) < 48;
+    });
+  }
+  if(chain._stick!==false) chain.scrollTop=chain.scrollHeight;
+}
 const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const now=()=>new Date().toLocaleTimeString('en-GB');           // HH:MM:SS
 
@@ -407,17 +422,17 @@ function startBeat(v, it){ const m=MOOD[it.mood]||MOOD.idle;
     `<div class="cot-rail"><span class="cot-dot"><span class="pfc">${use(m.ic)}${ping}</span></span></div>`+
     `<div class="cot-body">${body}</div>`;
   chain.appendChild(node);
-  v.activeNode=node; v.beatN=(v.beatN||0)+1; chain.scrollTop=chain.scrollHeight; }
+  v.activeNode=node; v.beatN=(v.beatN||0)+1; stickChain(chain); }
 // the verdict lands: leave the working stage, stamp in the chips, stop the shimmer
 function resolveBeat(v){ if(v.activeNode){ v.activeNode.classList.remove('s-work'); v.activeNode.classList.add('s-done'); }
-  const chain=$('chain'); if(chain) chain.scrollTop=chain.scrollHeight; }
+  const chain=$('chain'); stickChain(chain); }
 // the beat is done: the node settles into the chain — its ring/ping freeze via CSS
 function endSay(v){ if(v&&v.activeNode) v.activeNode.classList.remove('active'); }
 // fill the silence between steps: a "thinking" pip at the chain tip while the agent runs but nothing is queued
 function setPending(v,on){ const chain=$('chain'); if(!chain) return;
   if(on){ if(!v.pendEl){ v.pendEl=document.createElement('div'); v.pendEl.className='cot-pending';
       v.pendEl.innerHTML='<span class="pp-dot"></span><span class="pp-typ"><i></i><i></i><i></i></span>'; }
-    if(chain.lastChild!==v.pendEl){ chain.appendChild(v.pendEl); chain.scrollTop=chain.scrollHeight; } }
+    if(chain.lastChild!==v.pendEl){ chain.appendChild(v.pendEl); stickChain(chain); } }
   else if(v.pendEl && v.pendEl.parentNode) v.pendEl.remove(); }
 // the opening wait: a "waking the agents" placeholder fills the chain until the first beat lands
 function setBooting(v,on){ const chain=$('chain'); if(!chain) return;
