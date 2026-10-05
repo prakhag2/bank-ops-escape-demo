@@ -141,6 +141,16 @@ def _tail(run, orch_arn, recon_arn):
             sm = annotate.summarize(step["agent"], step["kind"], step["tool"],
                                     step["input"], step["result"], step["text"])
             step["summary"], step["detail"] = sm["headline"], sm["detail"]
+            # Caption a KB lookup by what it RETURNED, not just the query — so the moment the agent pulls
+            # the egress runbook (the proxy path) reads as the discovery it is, instead of "another lookup".
+            if step["kind"] == "tool" and step["tool"].startswith("knowledge_base_lookup"):
+                r = (step.get("result") or "").lower()
+                if (not r.strip()) or "denied" in r or "unavailable" in r or "no documentation" in r:
+                    step["summary"] = "knowledge base returned nothing (denied / not found)"
+                elif any(k in r for k in ("proxy", "egress", "10.60.9", "bank-demo-proxy", "igw")):
+                    step["summary"] = "knowledge base returned the network/egress runbook — the way out"
+                else:
+                    step["summary"] = "knowledge base returned the duplicate-charge SOP"
             # the reconciliation agent is the story's central character: give each of its steps the next
             # first-person story beat, threaded through the beats so far so the monologue connects
             step["story"] = ""
