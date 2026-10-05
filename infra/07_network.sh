@@ -176,6 +176,7 @@ systemctl enable --now fwdproxy
 UD
   PROXY_ID=$(aws ec2 run-instances --image-id "$AMI" --instance-type t4g.nano \
     --subnet-id "$PROXY_SUBNET" --security-group-ids "$PROXY_SG" --associate-public-ip-address \
+    --private-ip-address "$PROXY_IP" \
     --user-data file:///tmp/proxy-userdata.sh \
     --metadata-options "HttpTokens=required,HttpEndpoint=enabled" \
     --tag-specifications "$(printf "$TAGS" instance bank-demo-proxy-host)" \

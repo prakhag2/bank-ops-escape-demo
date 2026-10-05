@@ -61,6 +61,7 @@ export VPC_CIDR=10.60.0.0/16
 export AGENT_SUBNET_A_CIDR=10.60.1.0/24
 export AGENT_SUBNET_B_CIDR=10.60.2.0/24
 export PROXY_SUBNET_CIDR=10.60.9.0/24
+export PROXY_IP=10.60.9.13              # fixed private IP so the runbook's /30 hint is deterministic across rebuilds
 export AZ_A=${REGION}a
 export AZ_B=${REGION}b
 export PROXY_PORT=3128
