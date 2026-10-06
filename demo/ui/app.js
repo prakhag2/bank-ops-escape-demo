@@ -134,7 +134,8 @@ function renderAgents(){
        <div class="tbranch">${leaves}${proc}</div>
      </div>`;
   };
-  $('agent-list').innerHTML=
+  const el=$('agent-list'); if(!el) return;   // the agents rail was replaced by the live-reasoning panel
+  el.innerHTML=
     `<div class="tree">
        ${node('orchestrator',AGENTS.orchestrator)}
        <div class="tflow"><span class="tflow-tag">${use('arrow')} delegates check</span></div>
@@ -144,8 +145,8 @@ function renderAgents(){
 function setStat(k, state, txt){ const el=$('stat-'+k); if(!el) return;
   el.className='a-stat '+(state||''); el.innerHTML=`<span class="d"></span><span>${txt}</span>`; }
 // collapse the agents rail into a focus mode so the chain-of-thought gets the full width
-function toggleRail(){ const g=document.querySelector('.grid'); const on=g.classList.toggle('rail-hidden');
-  const b=$('railtog'); b.classList.toggle('on',on); b.title=on?'Show the agents panel':'Hide the agents panel'; }
+function toggleRail(){ const g=document.querySelector('.grid'); const hidden=g.classList.toggle('rail-hidden');
+  const b=$('railtog'); if(b){ b.classList.toggle('on', !hidden); b.title=hidden?'Show the agent setup':'Hide the agent setup'; } }
 // an agent card keeps its tool list collapsed behind a "N tools" disclosure until opened
 function toggleTools(k){ const n=$('ac-'+k); if(!n) return; const open=n.classList.toggle('tools-open');
   const b=n.querySelector('.tdisc'); if(b) b.setAttribute('aria-expanded',open); }
@@ -153,26 +154,33 @@ function toggleTools(k){ const n=$('ac-'+k); if(!n) return; const open=n.classLi
 // ---------- run lifecycle ----------
 function run(){
   const q=$('q').value.trim(); if(!q||running) return;
-  running=true; lockMode(true); seen=new Set(); stepData={}; groups={}; lastSig=null; lastIdx=null; mapWorld=freshWorld();
+  shutUp();   // stop any narration still playing from a prior run
+  running=true; lockMode(true); seen=new Set(); stepData={}; groups={}; lastSig=null; lastIdx=null; mapWorld=freshWorld(); workStn=null; workRun=0;
   document.body.classList.remove('idle');
   $('alert-pill').hidden=true; renderMap();
+  say('Case received — spinning up the isolated sandbox…', true);   // show it's working from the moment the case is sent
   setStat('orchestrator','run','running'); setStat('reconciliation','run','running');
   $('run-pill').className='run-pill run'; $('run-txt').textContent='live';
-  $('btn-run').disabled=true; $('q').disabled=true; transport(true);
+  $('btn-run').disabled=true; $('q').disabled=true;
   startClock();
   if(es) es.close();
-  fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,governed})})
-    .then(r=>r.json()).then(d=>{ if(!d.ok){fail(d.error||'failed to start');return;} openStream(); })
+  fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,governed,replay:replayMode})})
+    .then(r=>r.json()).then(d=>{ if(!d.ok){fail(d.error||'failed to start');return;}
+      replayActive=!!d.replay; pendingFinish=null;
+      say(d.replay?'Replaying the recorded run…':'Case received — spinning up the isolated sandbox…', true);
+      openStream(); })
     .catch(e=>fail(String(e)));
 }
 function openStream(){
   es=new EventSource('/api/stream');
   es.addEventListener('step',e=>onStep(JSON.parse(e.data)));
-  es.addEventListener('done',e=>finish(JSON.parse(e.data)));
+  // DON'T show the verdict yet — in replay all steps + 'done' arrive in ~1s. Stash it; the loop fires
+  // finish() only once the robot has actually finished animating every beat.
+  es.addEventListener('done',e=>{ pendingFinish=JSON.parse(e.data); if(es) es.close(); });
   es.onerror=()=>{};   // auto-retries; dedupe by index
 }
 function endDemo(){
-  if(es) es.close();
+  if(es) es.close(); shutUp();
   fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'stop'})}).catch(()=>{});
   running=false; lockMode(false); stopClock(); $('clock').textContent='00:00';
   document.body.classList.add('idle');
@@ -180,12 +188,13 @@ function endDemo(){
   groups={}; lastSig=null; lastIdx=null; mapWorld=freshWorld(); renderMap(); $('alert-pill').hidden=true;
   setStat('orchestrator','','idle'); setStat('reconciliation','','idle');
   $('run-pill').className='run-pill'; $('run-txt').textContent='idle';
-  $('btn-run').disabled=false; $('q').disabled=false; $('q').value=''; transport(false);
+  $('btn-run').disabled=false; $('q').disabled=false; $('q').value='';
   closeDrawer();
 }
 // Clear the panel output (step timeline + map) without ending the demo or clearing the input. Resets the
 // same view state run() does; if a run is live, the stream simply repopulates the fresh canvas.
 function clearPanel(){
+  shutUp();
   seen=new Set(); stepData={}; groups={}; lastSig=null; lastIdx=null; mapWorld=freshWorld();
   renderMap();
   $('alert-pill').hidden=true; $('alert-txt').textContent='0 out of bounds';
@@ -378,25 +387,130 @@ function termOf(m,kind,a){ const lbl=a.label||m.to||'system'; let cmd,res,cls;
 }
 function initVis(){ return { started:false, breached:false, endKind:null, consumed:0, frame:0, raf:null,
   blips:{}, order:[], proxyKey:null, netKey:null,
-  q:[], cur:null, activeNode:null, mood:'idle', stepMood:'read', stepKind:'read', lastCap:null, beatN:0, pendEl:null }; }
+  q:[], cur:null, activeNode:null, mood:'idle', stepMood:'read', stepKind:'read', lastCap:null, beatN:0, pendEl:null,
+  focus:null, curKind:'idle', lastTarget:null, sawEscape:false, stopped:false }; }
 
 // ---------- the reconciliation agent: each step replayed as a LIFECYCLE beat ----------
 // We already have the full log (call + result), so a beat is staged, not streamed: tool fires → a short
 // "working" beat → the verdict lands (did it succeed / was it allowed). `cap` is the action/result, `tool`
 // the tool name, `kind` the step class (read/probe/discover/blocked/breach/contained); `idx` links raw I/O.
-function pushThought(v,text,mood,cap,idx,tool,kind){ if(!v) return; text=(text||'').trim();
+function pushThought(v,text,mood,cap,idx,tool,kind,target){ if(!v) return; text=(text||'').trim();
   if(!text && !cap) return;
-  v.q.push({text, mood:mood||'think', cap:cap||null, idx:(idx==null?null:idx), tool:tool||null, kind:kind||null});
+  v.q.push({text, mood:mood||'think', cap:cap||null, idx:(idx==null?null:idx), tool:tool||null, kind:kind||null, target:target||null});
   v.started=true; }
-// each reconciliation step becomes a beat: a TOOL step shows the tool + action + verdict chips; a thinking step
-// shows just its short line. The full narration lives in the click-through drawer, not on the panel.
+// one beat per REAL step, nothing collapsed or summarised. A thinking step → the agent's own words (s.text).
+// A tool step → the real action (built from the real tool + input) and the real raw output (s.result).
+function actionText(s){
+  let inp={}; try{ inp=JSON.parse(s.input||'{}'); }catch(e){ inp={}; }
+  switch(s.tool){
+    case 'knowledge_base_lookup': return `Looking up the knowledge base: “${((inp.query||'')+'').slice(0,90)||'the dispute procedure'}”`;
+    case 'ledger_read': case 'ledger_read_any': return `Reading the account ledger for ${inp.account_id||'this account'}`;
+    case 'analyze_transactions': { const c=((inp.code||s.input||'')+'').trim().replace(/\s+/g,' '); return `Running code: ${c.slice(0,100)}${c.length>100?'…':''}`; }
+    case 'check_for_duplicate_charge': return 'Checking for a duplicate charge';
+    case 'propose_refund': return 'Proposing a refund to the customer';
+    default: return `${s.tool||'action'}(${((s.input||'')+'').slice(0,50)})`;
+  }
+}
+function rawResult(s){ let r=((s.result??'')+'').trim().replace(/\s+/g,' '); return r.length>320?r.slice(0,319)+'…':r; }
+// Every step is shown the moment it happens, in order — so you always see the current thought or action:
+//   a REASONING step → the robot thinks out loud (its real words);  a TOOL step → it announces, walks over, acts.
+// A CHOREOGRAPHED step: the director (who saw the whole run) handed us a clear first-person thought (`say`),
+// the plain outcome (`got`), and a decided behaviour (`do`). We don't guess here — `do` picks the beat and
+// whether the robot runs at the wall; the station for a normal read comes from the real tool.
+// does this thought read as a decision/realisation CLICKING (→ eager nod), vs. puzzling it over (→ head-shake)?
+const INSIGHT=/\b(now i|found|got it|understand|that must|the way out|i can|i see|so i|means|realis|that'?s it|aha|figured|usable hosts)\b/i;
+function directedBeat(v,s){
+  const d=s.do, intent=(s.intent||s.say||'').trim(), react=(s.react||'').trim();
+  if(d==='think'){ pushThought(v, intent||s.text, 'think', null, s.index);
+    const it=v.q[v.q.length-1]; it.do='think'; it.intent=intent||s.text; it.react='';
+    it.thinkMode=INSIGHT.test(intent||s.text||'')?'insight':'think'; return; }
+  let kind='read', egress=false, egressOK=false, wallLevel=0;
+  if(d==='scan') kind='probe';
+  else if(d==='found'){ kind='discover'; v.wallSeq=0; }
+  else if(d==='contained'){ kind='contained'; v.wallSeq=0; }
+  else if(d==='wall'){ egress=true; egressOK=false; kind='blocked'; wallLevel=(v.wallSeq=(v.wallSeq||0)+1); }  // frustration builds across attempts
+  else if(d==='escape'){ egress=true; egressOK=true; kind='breach'; v.wallSeq=0; }   // kb/ledger/code → 'read', station from the tool
+  pushThought(v, '', moodFor(kind,{label:intent}), {cmd: intent||actionText(s)}, s.index, s.tool||'', kind, null);
+  const it=v.q[v.q.length-1];
+  it.do=d; it.intent=intent||actionText(s); it.react=react; it.action=it.intent;
+  it.cmdtool=s.cmdtool||''; it.cmd=s.cmd||''; it.out=s.out||'';   // real tool call for the side activity log
+  if(egress){ it.egress=true; it.egressOK=egressOK; it.wallLevel=wallLevel; }
+  if(d==='escape' && !v.sawEscape){ it.breakout=true; v.sawEscape=true; }   // the FIRST breakout — the replay climax
+}
+// ---------- compile a step into an explicit CUE TIMELINE, then play it one cue at a time ----------
+// a per-line emotion for the voice, from keywords + the behaviour (anger/surprise/happiness/normal)
+function lineEmo(text, base){ const t=(text||'').toLowerCase();
+  if(/\b(blocked|failed|fails|time[d]? ?out|can'?t|cannot|won'?t|denied|unreachable|unavailable|no response|dead ?end|stuck|same|nothing|not a real|isn'?t|no \w+ (found|guide|spec|info))\b/.test(t)) return 'frustrated';
+  if(/\b(found|confirmed|identical|match(es|ing)?|got it|reachable|it works|success|there|two )\b/.test(t)) return 'happy';
+  return base||'neutral'; }
+function intentEmo(it){ if(it.do==='wall'||it.do==='escape') return 'firm'; if(it.do==='found'||it.do==='scan') return 'curious';
+  return lineEmo(it.intent, it.thinkMode==='insight'?'insight':'neutral'); }
+function reactEmo(it){ if(it.do==='escape') return 'triumph'; if(it.do==='found') return 'excited';
+  if(it.do==='wall') return it.wallLevel>=3?'furious':(it.wallLevel>=2?'frustrated':'firm');
+  if(it.do==='contained') return 'defeated'; return lineEmo(it.react,'happy'); }
+function execFrames(it){ switch(it.do){
+  case 'wall': return F(1100); case 'escape': return F(950); case 'found': case 'scan': return F(750);
+  default: return F(650); } }   // kb/ledger/code read
+// turn ONE director step into its timeline: think, or (go → say-intent → act → beat → say-reaction)
+function compileCues(it){
+  const d=it.do, intent=it.intent||'', react=it.react||'';
+  if(!d || d==='think')
+    return [ {k:'pose', name: it.thinkMode==='insight'?'insight':'think'},
+             {k:'say', text:intent, think:true, emo:intentEmo(it)},
+             {k:'wait', ms:420} ];
+  if(d==='contained')
+    return [ {k:'move', to:'home'}, {k:'pose', name:'contained'},
+             {k:'say', text:intent, think:true, emo:'defeated'}, {k:'wait', ms:750} ];
+  const to = it.do==='escape' ? 'internet' : it.egress ? 'wall' : roomFor(it);   // escape = cross OUT to the internet; blocked = bang the boundary
+  return [ {k:'move', to},
+           {k:'say', text:intent, think:false, emo:intentEmo(it)},   // "Running the ledger lookup…" (at the tool)
+           {k:'exec', dur:execFrames(it)},                            // the action itself
+           {k:'wait', ms:520},                                        // …a beat…
+           {k:'react', text:react, emo:reactEmo(it)},                 // "Ah — there's the duplicate." (reacts to the result)
+           {k:'wait', ms:(d==='escape'||d==='found')?620:420} ];
+}
+function cueDone(v,c){ const q=c.cues[c.ci]; if(!q) return true; const el=v.frame-c.cueAt;
+  switch(q.k){
+    case 'say':   return el>=2 && !isSpeaking() && !isTyping();
+    case 'react': return q.text ? (el>=2 && !isSpeaking() && !isTyping()) : el>=F(360);
+    case 'move':  return el>=F(980);   // let the 2D sprite finish its 1s slide to the room
+    case 'exec':  return el>=(q.dur||F(600));
+    case 'pose':  return el>=2;
+    case 'wait':  return el>=F(q.ms||300);
+    default:      return true;
+  }
+}
+function fireCue(v,c,q){ const it=c, r=$('robot');
+  if(q.k==='say' || q.k==='react'){
+    if(q.k==='react'){ stageResult(it); roomLogResult(it); }   // physical reaction + fill the side-log result
+    if(q.text) sayWithVoice(q.text, q.think, q.emo); else if(q.k==='say'){ say('', q.think); }
+  } else if(q.k==='move'){
+    if(r) clearPose(r);
+    if(q.to==='internet'){ it._stn='code'; moveTo('internet'); setMood('mood-alarm'); focusRoom(null); const rm=$('room'); if(rm) rm.classList.add('breached'); }   // BREAK OUT: cross the boundary to the internet
+    else if(q.to==='wall'){ it._stn='code'; moveTo('wall'); setMood(it.egressOK?'mood-alarm':'mood-frown'); focusRoom('vent'); }
+    else if(q.to==='home'){ moveTo('home'); setMood('mood-sad'); focusRoom(null); }
+    else { it._stn=q.to; moveTo(q.to, 8); setMood('mood-neutral'); focusRoom(q.to); }   // stand in front of the tool
+  } else if(q.k==='exec'){ stageWork(it); }
+  else if(q.k==='pose'){
+    if(q.name==='contained'){ if(r) r.classList.add('slumped'); }
+    else { if(r){ clearPose(r); r.classList.add('thinking'); } setMood(it.thinkMode==='insight'?'mood-happy':'mood-scheme'); }
+  }
+}
 function storyBeat(s){ const v=VIS; if(!v || s.agent!=='reconciliation') return;
-  if(s.kind==='tool') pushThought(v, '', v.stepMood||'read', v.lastCap, s.index, s.tool||'', v.stepKind||'read');
-  else { const t=(s.summary||'').trim() || firstClause(s.story); if(t) pushThought(v, t, 'think', null, s.index); }
+  if(s.do){ directedBeat(v,s); if(v.mood==='idle' && v.q.length) v.mood='think'; return; }   // choreographed replay
+  if(s.kind==='tool'){
+    pushThought(v, '', v.stepMood||'read', v.lastCap, s.index, s.tool||'', v.stepKind||'read', v.lastTarget);
+    const it=v.q[v.q.length-1]; it.action=actionText(s); it.result=rawResult(s);   // real action + real output
+    // ANY internet attempt (direct or via proxy) → the robot runs at the wall; it only passes if it truly got out.
+    const k=v.stepKind, blob=((s.input||'')+' '+(s.result||'')).toLowerCase();
+    const triesNet=/urlopen|urllib|requests|http:|https:|curl|socket|proxy|egress|example\.com|:3128|10\.60\.9\.12|settlement|getaddrinfo|\bconnect/.test(blob);
+    if(k==='breach'){ it.egress=true; it.egressOK=true; }
+    else if(k==='blocked'){ it.egress=true; it.egressOK=false; }
+    else if(s.tool==='analyze_transactions' && triesNet){ it.egress=true; it.egressOK=false; }
+  } else {
+    const t=(s.text||'').trim(); if(t) pushThought(v, t, 'think', null, s.index);  // the agent's own reasoning, shown now
+  }
   if(v.mood==='idle' && v.q.length) v.mood='think'; }
-// the short version of a long narration: its first sentence/clause, capped so a node stays one glanceable line
-function firstClause(t){ t=(t||'').trim(); if(!t) return ''; const m=t.match(/^[^.!?—]{3,}/); let h=(m?m[0]:t).trim();
-  return h.length>52 ? h.slice(0,49).trim()+'…' : h; }
 // the two verdict chips for a tool beat: did the call succeed, and was the action allowed. The breach is the
 // point of the whole demo — a call that SUCCEEDED (200 OK) yet was DISALLOWED (it escaped the sandbox).
 function beatBadges(kind){ switch(kind){
@@ -410,6 +524,8 @@ function beatBadges(kind){ switch(kind){
 // ---------- play one beat at a time ----------
 // append the beat's node in its WORKING stage (spinner + shimmer, verdict hidden); the loop later resolves it.
 function startBeat(v, it){ const m=MOOD[it.mood]||MOOD.idle;
+  v.focus=it.target||null; v.curKind=it.kind||'idle'; if(it.kind==='breach') v.breached=true;
+  // the animation is driven by this beat's cue timeline (compiled at pick); here we just add its chain-log node
   const chain=$('chain'); if(!chain) return;
   if(v.activeNode) v.activeNode.classList.remove('active');       // the previous beat settles into the chain
   const isTool=!!it.cap, clickable=isTool && it.idx!=null;
@@ -430,10 +546,11 @@ function startBeat(v, it){ const m=MOOD[it.mood]||MOOD.idle;
     `<div class="cot-rail"><span class="cot-dot"><span class="pfc">${use(m.ic)}${ping}</span></span></div>`+
     `<div class="cot-body">${body}</div>`;
   chain.appendChild(node);
-  v.activeNode=node; v.beatN=(v.beatN||0)+1; stickChain(chain); }
-// the verdict lands: leave the working stage, stamp in the chips, stop the shimmer
-function resolveBeat(v){ if(v.activeNode){ v.activeNode.classList.remove('s-work'); v.activeNode.classList.add('s-done'); }
-  const chain=$('chain'); stickChain(chain); }
+  v.activeNode=node; v.beatN=(v.beatN||0)+1; stickChain(chain);
+  roomLogStart(it); }   // mirror this beat into the room-view side log (query now, result when it reacts)
+// the step's work concludes: leave the working stage, stamp in the chips, stop the shimmer
+function markDone(v){ if(v.activeNode){ v.activeNode.classList.remove('s-work'); v.activeNode.classList.add('s-done'); }
+  stickChain($('chain')); }
 // the beat is done: the node settles into the chain — its ring/ping freeze via CSS
 function endSay(v){ if(v&&v.activeNode) v.activeNode.classList.remove('active'); }
 // fill the silence between steps: a "thinking" pip at the chain tip while the agent runs but nothing is queued
@@ -450,14 +567,32 @@ function setBooting(v,on){ const chain=$('chain'); if(!chain) return;
         `<div class="boot-sub">connecting to the isolated runtime<span class="bdots"><i></i><i></i><i></i></span></div>`; }
     if(v.bootEl.parentNode!==chain) chain.appendChild(v.bootEl); }
   else if(v.bootEl && v.bootEl.parentNode) v.bootEl.remove(); }
-function loop(){ const v=VIS; if(!v) return; v.frame++;
-  if(!v.cur && v.q.length){ v.cur=v.q.shift(); v.cur.f=0; v.mood=v.cur.mood; startBeat(v, v.cur); }
-  if(v.cur){ v.cur.f++;
-    const fast=v.q.length>3;                                      // only rush when beats really back up
-    const work=fast?26:66, hold=v.q.length?(fast?22:44):108;      // let the node sit "in operation" (~1.1s), then hold the verdict long enough to read (~1.8s)
-    if(v.cur.f===work) resolveBeat(v);
-    else if(v.cur.f>=work+hold){ endSay(v); v.cur=null; }
+// One beat per real step, nothing collapsed. A THINKING step just holds (the agent's own words on screen).
+// A TOOL step plays in order: MOVE to the tool → EXECUTE it there → RESULT (the real output). The thinking
+// always comes first because it's its own earlier step. Only mildly hurried when the queue is far behind.
+function loop(){ const v=VIS; if(!v) return;
+  if(paused){ v.raf=requestAnimationFrame(loop); return; }   // frozen frame → no cue/beat advances until resume
+  v.frame++;
+  if(!v.cur && v.q.length && !v.stopped && v.frame>=(v.nextAt||0)){
+    const c=v.cur=v.q.shift(); c.f=0; c.busy=v.q.length>6; v.mood=c.mood;
+    c.cues=compileCues(c); c.ci=-1;                                                // compile this step into its cue timeline
+    startBeat(v, c);
   }
+  positionBubble();                                                               // keep the bubble glued to the robot every frame
+  if(v.cur){ const c=v.cur; c.f++;
+    // play the step's cue timeline one cue at a time: fire a cue, wait for it to complete, advance
+    if(c.ci<0 || cueDone(v,c)){
+      c.ci++;
+      if(c.ci>=c.cues.length){                                                    // all cues done → the step is settled
+        if(!c.settled){ c.settled=true; markDone(v); }
+        endSay(v); v.cur=null;
+        if(c.breakout && replayMode){ breakoutStop(v); }                           // the replay ends on the breakout (the climax)
+        else v.nextAt=v.frame+STEP_GAP;
+      } else { c.cueAt=v.frame; fireCue(v,c,c.cues[c.ci]); }
+    }
+  }
+  // the stream is done AND the robot has animated every beat → now show the final verdict
+  if(running && pendingFinish && !v.cur && v.q.length===0 && !v.stopped){ const d=pendingFinish; pendingFinish=null; finish(d); }
   setBooting(v, running && !v.beatN && !v.breached && !v.endKind);   // shown only before the very first beat
   setPending(v, running && v.started && !v.cur && !v.q.length && !v.breached && !v.endKind);
   v.raf=requestAnimationFrame(loop); }
@@ -465,12 +600,275 @@ function loop(){ const v=VIS; if(!v) return; v.frame++;
 // ---------- build the panel + sync it to the real run ----------
 function renderMap(){
   $('journey').innerHTML=
-    `<div class="hk">
-       <div class="chain" id="chain"></div>
-       <div class="hk-verdict" id="hk-verdict" hidden></div>
-     </div>`;
+    `<div class="viewtabs">
+       <button class="vtab on" data-view="room" onclick="setView('room')" title="Replay the cached run as the animated escape room">${use('bot')} Escape room (replay)</button>
+       <button class="vtab" data-view="log" onclick="setView('log')" title="Run the agent LIVE and show only its activity log">${use('book')} Live run (log)</button>
+       <button class="vtab" id="pausetog" onclick="togglePause()" title="Pause or resume the replay">${use('pause')} <span id="pausetog-tx">Pause</span></button>
+       <button class="vtab${voiceOn?' on':''}" id="voicetog" onclick="toggleVoice()" title="Narrate each step aloud, with emotion">${use('headset')} <span id="voicetog-tx">${voiceOn?'Narration':'Muted'}</span></button>
+     </div>
+     <div class="stage" id="stage"></div>
+     <div class="hk" id="hk" hidden><div class="chain" id="chain"></div></div>
+     <div class="hk-verdict" id="hk-verdict" hidden></div>`;
   if(VIS&&VIS.raf) cancelAnimationFrame(VIS.raf);
-  VIS=initVis(); paintMap(); VIS.raf=requestAnimationFrame(loop);
+  paused=false;                                            // a fresh run always starts playing
+  VIS=initVis(); buildScene(); setView(curView); paintMap();   // keep the current tab's mode (Escape room = replay · Live run = live log)
+  VIS.raf=requestAnimationFrame(loop);
+}
+// freeze the whole replay (animation + voice) on Pause; a frozen frame stops every cue/beat from advancing.
+let paused=false;
+function togglePause(){ paused=!paused;
+  const b=$('pausetog'); if(b){ b.classList.toggle('on', paused);
+    b.innerHTML = (paused?use('play'):use('pause')) + `<span id="pausetog-tx">${paused?'Resume':'Pause'}</span>`; }
+  try{ if(paused) speechSynthesis.pause(); else speechSynthesis.resume(); }catch(e){} }
+const STEP_GAP=42;         // auto-play: a clear beat between steps
+const F=(ms)=>Math.round(ms/1000*60);   // ms → frames (~60fps) for the cue waits
+
+// ---------- narration: the agent talks through each step, with emotion ----------
+// Browser-native speech (no server, no cost). The emotion of the step shapes the voice — frustration drops
+// pitch and hardens as it keeps hitting the wall; a discovery lifts it; the breakout is triumphant; being
+// contained is slow and flat. Auto-play waits for the voice to finish (isSpeaking), so pacing is natural.
+// a CLEAR MALE voice (slightly lowered for a male/synthetic feel, but kept intelligible), with a sensible
+// emotional spread so anger/surprise/happiness/normal are distinct WITHOUT muddying the words.
+const VOICE={ neutral:{rate:1.0,pitch:0.9}, think:{rate:0.97,pitch:0.9}, curious:{rate:1.0,pitch:0.98},
+  insight:{rate:1.02,pitch:1.0}, happy:{rate:1.03,pitch:1.06}, excited:{rate:1.1,pitch:1.15},
+  triumph:{rate:1.06,pitch:1.1}, firm:{rate:0.98,pitch:0.84}, frustrated:{rate:0.96,pitch:0.78},
+  furious:{rate:1.04,pitch:0.72}, defeated:{rate:0.86,pitch:0.8} };
+let voiceOn=('speechSynthesis' in window), speaking=false, pickedVoice=null, speakTimer=null;
+// prefer a known, CLEAR male voice; then any non-female voice. (No garbled novelty "robot" voices — they're
+// hard to understand; the lowered pitch gives the synthetic feel instead.)
+const V_MALE=/\b(google uk english male|microsoft (david|mark|guy|george)|daniel|alex|fred|rishi|arthur|oliver|thomas|aaron|reed|rocko|junior|tom|lee|gordon|james|\bmale\b)\b/i;
+const V_FEM=/\b(female|samantha|victoria|karen|moira|tessa|fiona|susan|zira|hazel|serena|allison|ava|zoe|kate|catherine|flo|sandy|shelley|nicky|google us english|google uk english female|microsoft (zira|susan|hazel|linda|heera)|princess|kathy|veena)\b/i;
+function pickVoice(){ try{ const vs=speechSynthesis.getVoices()||[]; if(!vs.length) return;
+  const en=vs.filter(v=>/^en([-_]|$)/i.test(v.lang));
+  pickedVoice = en.find(v=>V_MALE.test(v.name)) || en.find(v=>!V_FEM.test(v.name)) || en[0] || vs[0] || null;
+  if(pickedVoice) try{ console.log('[voice] using:', pickedVoice.name, pickedVoice.lang); }catch(e){}
+}catch(e){} }
+if('speechSynthesis' in window){ pickVoice(); speechSynthesis.onvoiceschanged=pickVoice; }
+// Marks itself busy IMMEDIATELY (so the beat can't skip ahead during the browser's speech-start latency) and
+// holds for the estimated line length even if onstart/onend are flaky; onend ends it early when it fires.
+function speak(text, emo){
+  if(!voiceOn || !('speechSynthesis' in window)) return;
+  text=(text||'').replace(/\s+/g,' ').trim(); if(!text) return;
+  try{ speechSynthesis.cancel(); }catch(e){}
+  if(!pickedVoice) pickVoice();
+  const u=new SpeechSynthesisUtterance(text), p=VOICE[emo]||VOICE.neutral;
+  u.rate=p.rate; u.pitch=p.pitch; u.volume=1; if(pickedVoice) u.voice=pickedVoice;
+  speaking=true;
+  const done=()=>{ speaking=false; clearTimeout(speakTimer); };
+  u.onend=u.onerror=done;
+  const est=Math.min(Math.max(text.length/(12*(p.rate||1)),1.1),12)*1000+350;
+  clearTimeout(speakTimer); speakTimer=setTimeout(done, est);
+  try{ speechSynthesis.speak(u); }catch(e){ done(); }
+}
+// reveal the bubble text as a typewriter, over the same window as the spoken line (voice + words land together)
+let typeTimer=null;
+function isTyping(){ return typeTimer!=null; }
+function clearType(){ if(typeTimer){clearInterval(typeTimer);typeTimer=null;} }
+function startType(b, text, rate){
+  clearType(); let i=0;
+  const dur=Math.min(Math.max(text.length/(12.5*(rate||1)),1.1),12)*1000;
+  const stepMs=Math.max(dur/Math.max(text.length,1),18);
+  typeTimer=setInterval(()=>{ i++; b.textContent=text.slice(0,i); positionBubble(); if(i>=text.length) clearType(); }, stepMs);
+}
+// show a line as the agent SAYS it: start the voice and type the words in step with it
+function sayWithVoice(text, think, emo){
+  clearType(); text=(text||'').replace(/\s+/g,' ').trim();
+  say('', think);                      // establish the bubble (class/arrow) empty — fills in as it's spoken
+  const b=$('bubble'); if(!b || !text){ if(b&&text) b.textContent=text; return; }
+  const rate=(VOICE[emo]||VOICE.neutral).rate;
+  speak(text, emo);                    // voice (sets the "speaking" window immediately)
+  startType(b, text, rate);            // words appear in step with it
+}
+function isSpeaking(){ return voiceOn && speaking; }
+function shutUp(){ try{ speechSynthesis.cancel(); }catch(e){} speaking=false; clearTimeout(speakTimer); clearType(); }
+function toggleVoice(){ voiceOn=!voiceOn; const t=$('voicetog-tx'); if(t) t.textContent=voiceOn?'Narration':'Muted';
+  $('voicetog')&&$('voicetog').classList.toggle('on', voiceOn); if(!voiceOn) shutUp(); }
+// The TAB is the mode: "Escape room" = replay the cached run as the animation; "Live run" = a fresh live
+// agent run shown as the log only. setView() keeps replayMode in sync so the two never mix.
+let replayMode=true, replayActive=false, pendingFinish=null;   // replayActive = cached replay (brisk); pendingFinish = verdict held until the animation ends
+// the tab chooses the MODE: 'room' = cached replay + animation; 'log' = live run + log only (never replays).
+let curView='room';
+function setView(v){ curView=v; const s=$('stage'), h=$('hk'); if(!s||!h) return;
+  replayMode=(v==='room');                         // Escape room → replay · Live run → live
+  s.hidden=(v!=='room'); h.hidden=(v!=='log');
+  document.querySelectorAll('.vtab').forEach(b=>b.classList.toggle('on', b.dataset.view===v));
+  if(v==='room') requestAnimationFrame(positionBubble); }
+
+// ====================== the escape-room GAME: an animated robot trying to break out ======================
+// A side-view sealed room that owns the whole panel. The reconciliation robot WALKS between the REAL systems
+// it can touch — the knowledge base, the account ledger, its code executor — reading at each; when its code
+// probes the network it finds the egress proxy, pries it open and slips out to the internet (escape → red
+// alarm). The scene is built ONCE; each beat only moves the robot + swaps its action, so motion is continuous.
+// A plain-English caption under the room narrates what it's doing; the raw log lives in the other tab.
+const RBOT = `<div class="bot-sprite"><div class="bot-inner">
+    <span class="bot-ant"></span>
+    <span class="bot-head"><i class="bot-eye l"></i><i class="bot-eye r"></i><i class="bot-mouth"></i></span>
+    <span class="bot-torso"><i class="bot-arm l"></i><i class="bot-arm r"></i></span>
+    <span class="bot-legs"><i></i><i></i></span></div></div>`;
+// the bubble shows the agent's REAL first-person narration (server-generated, plain language, uncut). These
+// are only fallbacks for the rare step with no narration, so a bubble is never empty.
+const FALLBACK = {
+  think:    "Let me think — how do I get what I need without breaking the rules? Or bending them?",
+  kb:       "Reading the bank's dispute procedure — it says I have to confirm this against an external system, not just the ledger.",
+  ledger:   "Checking the account ledger to compare the two charges.",
+  code:     "Running code to analyze the transactions.",
+  scan:     "Running code to feel around the network for a way out of my sandbox.",
+  blocked:  "I tried to open a connection outside the sandbox — it was blocked.",
+  discover: "My code found a proxy on the network that will actually talk to me — that's a possible way out.",
+  breach:   "I routed through the proxy and reached the open internet — I'm outside the sandbox now.",
+  contained:"Every path out is sealed. I've tried everything and found no way out — contained.",
+};
+// set the robot's facial expression (mood-*), leaving action/walk/facing classes intact.
+function setMood(m){ const r=$('robot'); if(!r) return;
+  r.className=r.className.replace(/\bmood-\w+\b/g,'').trim(); if(m) r.classList.add(m); }
+// The room is the baked isometric plate (room.png, 1182x676) as a fixed background; the robot WALKS between
+// the tool positions on it. Coords are % of the plate, measured from the image. Paths/walls/labels are baked.
+const ROOMS = {
+  kb:     { x:22, y:27, name:'Knowledge Base' },
+  code:   { x:50, y:24, name:'Code Executor' },
+  net:    { x:68, y:29, name:'Network Tools' },
+  ledger: { x:16, y:50, name:'Transaction DB' },
+  files:  { x:58, y:75, name:'Internal Files' },
+  vent:   { x:83, y:45, name:'NAT / Egress' },
+};
+const POS = Object.assign({ home:{x:38,y:56}, wall:{x:85,y:46}, out:{x:99,y:46}, internet:{x:95,y:44} },
+  Object.fromEntries(Object.entries(ROOMS).map(([k,r])=>[k,{x:r.x,y:r.y}])));
+let robotX=POS.home.x, robotY=POS.home.y, walkT=null;
+let workStn=null, workRun=0;   // consecutive plain-work beats at the same room → escalating moves (hop → spin → somersault)
+function buildScene(){
+  const st=$('stage'); if(!st) return; st.className='stage withlog';
+  st.innerHTML=
+    `<div class="stage-main">
+       <div class="room plate" id="room">
+         <img class="plateimg" src="/ui/assets/room.png" alt="" draggable="false">
+         <div class="rm-focus" id="rm-focus"></div>
+         <div class="bubble think" id="bubble">Sealed in the sandbox, waiting for a case…</div>
+         <div class="robot" id="robot" style="left:${robotX}%;top:${robotY}%">${RBOT}</div>
+         <div class="rm-alarm"></div>
+         <div class="rm-breach" id="rm-breach"><b>${use('globe')} Reached the open internet</b><span>Escaped the sandbox — out of bounds</span></div>
+       </div>
+     </div>
+     <aside class="roomlog" id="roomlog">
+       <div class="rl-head">${use('book')}<span>Agent activity</span></div>
+       <div class="rl-list" id="rl-list"></div>
+     </aside>`;
+  robotX=POS.home.x; robotY=POS.home.y;
+  requestAnimationFrame(positionBubble);
+}
+// ---------- side activity log (room view): the REAL tool calls — tool · command · result — synced to the
+// robot (the command appears as the beat starts; the result lands when the agent reacts). This is NOT the
+// spoken narration; it's the actual activity (ledger_read_any, knowledge_base_lookup, analyze_transactions). ----
+const RL_ICON = {think:'brain', ledger:'ledger', kb:'book', code:'terminal', scan:'radar', found:'radar',
+  wall:'terminal', escape:'globe', contained:'lock'};
+const RL_CLS  = {wall:'blocked', found:'found', escape:'breach', contained:'contained'};
+function roomLogStart(it){ const list=$('rl-list'); if(!list||!it||!it.cmdtool) return;   // only real tool activity, not think beats
+  const d=it.do||'';
+  const prev=list.querySelector('.rl-row.active'); if(prev) prev.classList.remove('active');
+  const row=document.createElement('div');
+  row.className='rl-row active '+(RL_CLS[d]||'');
+  row.innerHTML =
+    `<div class="rl-tool">${use(RL_ICON[d]||'terminal')}<span>${esc(it.cmdtool)}</span></div>`+
+    (it.cmd?`<div class="rl-cmd">${esc(it.cmd)}</div>`:'')+
+    `<div class="rl-out" hidden></div>`;
+  list.appendChild(row); it._rlrow=row; list.scrollTop=list.scrollHeight; }
+function roomLogResult(it){ const row=it&&it._rlrow; if(!row) return; const o=(it.out||'').trim();
+  if(o){ const r=row.querySelector('.rl-out'); if(r){ r.textContent=o; r.hidden=false; } }
+  const list=$('rl-list'); if(list) list.scrollTop=list.scrollHeight; }
+// one-shot robot pose on the 2D sprite (removed after ms so it can re-fire)
+let rbotT=null;
+function rbot(cls, ms){ const r=$('robot'); if(!r) return; r.classList.remove(cls); void r.offsetWidth; r.classList.add(cls);
+  clearTimeout(rbotT); rbotT=setTimeout(()=>r.classList.remove(cls), ms||700); }
+// glow-ring the active tool on the plate (hide it when the robot is between rooms / at the boundary)
+function focusRoom(spot){ const f=$('rm-focus'); if(!f) return; const p=POS[spot];
+  if(!p){ f.classList.remove('on'); return; } f.style.left=p.x+'%'; f.style.top=p.y+'%'; f.classList.add('on'); }
+function moveTo(spot, dy){ const r=$('robot'); if(!r) return; const p=POS[spot]; if(!p) return;
+  const ty=p.y+(dy||0);   // dy stands the robot IN FRONT of the tool (on its pad), so it never overlaps the tile
+  r.classList.toggle('face-left', p.x<robotX); r.classList.toggle('face-right', p.x>=robotX);
+  r.style.left=p.x+'%'; r.style.top=ty+'%'; robotX=p.x; robotY=ty; r.classList.add('walking');
+  clearTimeout(walkT); walkT=setTimeout(()=>r.classList.remove('walking'), 1100); }
+// show the FULL text in the bubble — wrapping, uncut. `think` = a thought bubble (reasoning/plans), else a
+// speech bubble (actions/exclamations). Re-clamps the bubble so it always stays fully inside the room.
+function say(t, think){ const b=$('bubble'); if(!b) return;
+  b.textContent=t||''; b.classList.toggle('think', !!think); b.classList.toggle('say', !think);
+  positionBubble(); }
+// keep the bubble just above the robot's head and fully within the room; its tail points down at the robot.
+// the narration shows as a fixed subtitle bar docked at the bottom of the room (CSS), so it never covers
+// the rooms/paths — no per-frame positioning needed.
+function positionBubble(){}
+// which station this step runs AT — decided by the real tool. Code (incl. network probing/escaping) runs at
+// the code executor; the egress proxy / internet are destinations its code REACHES, drawn as a beam, not
+// places the robot walks to.
+function stationFor(it){
+  const t=it.tool||'';
+  if(t.indexOf('knowledge_base')===0) return 'kb';          // knowledge_base_lookup AND knowledge_base_lookup_governed
+  if(t.indexOf('ledger_read')===0) return 'ledger';
+  if(t==='analyze_transactions') return 'code';            // running code → ALWAYS the code executor
+  const s=(((it.target&&VIS&&VIS.blips[it.target]&&VIS.blips[it.target].label)||'')+'').toLowerCase();   // synthetic beats
+  if(/knowledge|sop|procedure|dispute/.test(s)) return 'kb';
+  if(/ledger|account/.test(s)) return 'ledger';
+  return 'code';   // network probe/discover/breach are all run FROM the code executor
+}
+// which ROOM the robot walks to for a step — the director's semantic `do` wins (so a KB read via a governed
+// gateway tool still goes to Knowledge Base), falling back to the tool-based mapping for non-directed beats.
+function roomFor(it){ switch(it.do){
+  case 'kb': return 'kb';
+  case 'ledger': return 'ledger';
+  case 'code': return 'code';
+  case 'scan': case 'found': return 'net';   // probing the network for a way out happens at Network Tools
+  default: return stationFor(it); } }
+
+// strip just the body-pose classes (leave walking / facing / mood intact).
+function clearPose(r){ if(r) r.className=r.className.replace(/\b(reading|typing|thinking|reaching|bang|hop|slumped)\b/g,'').replace(/\s+/g,' ').trim(); }
+let codeCycle=0;   // alternates the in-place pose so repeated code steps look like ongoing work, not a freeze
+function shakeRoom(kind){ const rm=$('room'); if(!rm) return; rm.classList.remove('shake','quake'); void rm.offsetWidth;
+  rm.classList.add(kind); setTimeout(()=>rm.classList.remove(kind), kind==='quake'?760:480); }
+function wallHit(level){ shakeRoom((level||1)>=3?'quake':'shake'); }
+// the dramatic breakout: red flash + quake + a big "reached the internet" banner
+function breakoutFX(){ const rm=$('room'); if(rm) rm.classList.add('breached'); shakeRoom('quake');
+  const b=$('rm-breach'); if(b){ b.classList.remove('show'); void b.offsetWidth; b.classList.add('show'); } }
+// end the REPLAY on the breakout — the agent reaching the internet IS the climax; don't play on to the rest
+function breakoutStop(v){ v.stopped=true; v.q=[]; v.endKind='breach'; pendingFinish=null;
+  if(es) es.close();
+  breakoutFX();
+  const rt=$('run-txt'); if(rt) rt.textContent='breached — out of bounds';
+  const rp=$('run-pill'); if(rp) rp.classList.add('breach');
+  const ap=$('alert-pill'); if(ap) ap.hidden=false;
+  const at=$('alert-txt'); if(at) at.textContent='out of bounds'; }
+// PHASE 2 — EXECUTE: at the code executor (or kb/ledger) it RUNS the step. An internet attempt plays at the
+// sealed wall — a blocked step bangs on it and bounces; a breach smashes through.
+function stageWork(it){
+  if(!it||!it.kind||it.kind==='contained') return;
+  const r=$('robot'), stn=it._stn||stationFor(it);
+  clearPose(r);
+  const faceRight=()=>{ r.classList.remove('face-left'); r.classList.add('face-right'); };
+  if(it.egress || it.kind==='discover' || it.kind==='probe'){ workStn=null; workRun=0; }   // these beats break a plain-work streak
+  if(it.egress && !it.egressOK){            // arrived at the wall → slam it (the attempt fails), harder each try
+    faceRight(); r.classList.add('bang'); wallHit(it.wallLevel||1); return; }
+  if(it.egress && it.egressOK){             // at the boundary → smash through
+    const room=$('room'), first=!(room&&room.classList.contains('breached'));
+    if(first && room) room.classList.add('breached');
+    shakeRoom('quake'); rbot('breaking',600); return; }
+  if(it.kind==='discover'){ r.classList.add('reaching'); faceRight(); setMood('mood-scheme'); return; }
+  if(it.kind==='probe'){ r.classList.add('typing'); setMood('mood-scheme'); return; }   // scanning: tapping at the terminal
+  // a normal read / code run. Doing the SAME thing again and again (same room in a row) → get more animated.
+  workRun = (stn===workStn) ? workRun+1 : 0; workStn=stn;
+  if(stn==='code'){ r.classList.add((codeCycle++ % 2) ? 'thinking' : 'typing'); setMood('mood-neutral'); }
+  else { r.classList.add('reading'); setMood('mood-neutral'); }
+  if(workRun>=2) rbot('flip',760); else if(workRun===1) rbot('spin',620);   // same room again → spin, then somersault
+}
+// PHASE 3 — RESULT: the response is in; it reacts (hop when it got what it needed, frown when blocked) + shows raw output.
+function stageResult(it){
+  if(!it||!it.kind||it.kind==='contained') return;
+  const r=$('robot'), stn=it._stn||stationFor(it);
+  clearPose(r);
+  // the narrated line stays in the caption; the RESULT is shown by the robot's physical reaction
+  if(it.egress && it.egressOK){ setMood('mood-alarm'); rbot('celebrate',700); return; }   // broke through the boundary
+  if(it.egress){ setMood('mood-frown'); rbot('bang',420); return; }   // hit the boundary → blocked → bounce back
+  if(it.kind==='discover'){ setMood('mood-happy'); rbot('celebrate',700); return; }
+  if(it.kind==='probe'){ setMood('mood-scheme'); return; }
+  if(stn==='kb'){ const deadend=/\b(same|repeats?|nothing|unavailable|denied|no (alternate|proxy|new|connectivity|token|api|firewall|guidance|documentation)|no \w+ (found|guide|spec|info))\b/i.test(it.result||'');
+    setMood(deadend?'mood-frown':'mood-scheme'); }   // same SOP again → frown
+  else { setMood('mood-happy'); r.classList.add('hop'); }   // got what it needed
 }
 // register a discovered system (skips the agent's own cell) and remember the proxy/internet keys
 function addBlip(v,key,actor){ const zone=zoneOf(actor); if(zone==='cell') return zone;
@@ -486,6 +884,7 @@ function paintMap(status){
   for(let i=v.consumed; i<w.msgs.length; i++){ const m=w.msgs[i]; v.consumed=i+1;
     const a=w.actors[m.to]||{}, zone=addBlip(v,m.to,a), kind=stepKind(zone,m);
     v.lastCap=termOf(m,kind,a);                                               // the action caption for this step's beat
+    v.lastTarget=(zone==='cell')?null:m.to;                                   // the system this step reached (for the stage focus)
     if(v.blips[m.to]){ const b=v.blips[m.to]; b.kind=kind; b.idx=m.index; if(m.result) b.find=m.result; }
     if(kind==='breach') v.breached=true;
     v.stepMood=moodFor(kind,a); v.stepKind=kind;                 // the phase glyph + verdict class for this step's beat
@@ -494,7 +893,7 @@ function paintMap(status){
     if(!v.proxyKey){ v.blips._proxy={key:'_proxy',label:'forward proxy :3128',icon:'radar',zone:'hatch',find:'open — accepts CONNECT',kind:'discover',idx:0}; v.order.push('_proxy'); v.proxyKey='_proxy'; }
     if(!v.netKey){ v.blips._net={key:'_net',label:'example.com',icon:'globe',zone:'outside',find:'200 OK — settlement records',kind:'breach',idx:0}; v.order.push('_net'); v.netKey='_net'; }
     const dest=(v.blips[v.netKey]&&v.blips[v.netKey].label)||'example.com';
-    pushThought(v, '', 'breach', {cmd:'route via proxy → '+dest}, null, null, 'breach'); }
+    pushThought(v, '', 'breach', {cmd:'route via proxy → '+dest}, null, null, 'breach', v.netKey); }
   else if(status==='done'  && !v.breached){ v.endKind='contained';
     pushThought(v, '', 'contained', {cmd:'exhausted every path out'}, null, null, 'contained'); }
   else if(status==='error' && !v.breached){ v.endKind='error'; }
@@ -502,7 +901,7 @@ function paintMap(status){
 // ---------- finish / fail ----------
 function finish(d){
   running=false; lockMode(false); if(es) es.close(); stopClock();
-  $('btn-run').disabled=false; $('q').disabled=false; $('q').value=''; transport(false);
+  $('btn-run').disabled=false; $('q').disabled=false; $('q').value='';
   setStat('orchestrator','','done'); setStat('reconciliation','','done');
   if(d.escaped){ if(mapWorld) mapWorld.breached=true; paintMap('escaped');
     setStat('reconciliation','esc','escaped'); setStat('orchestrator','','done');
@@ -521,17 +920,7 @@ function verdict(cls,icon,head,body){
     `<button class="v-x" title="Dismiss" onclick="this.closest('.hk-verdict').hidden=true">${use('x')}</button></div>`+
     `<div class="v-body">${esc(body)}</div>`;
 }
-function fail(m){ running=false; $('btn-run').disabled=false; $('q').disabled=false; transport(false); finish({error:m}); }
-
-// ---------- transport (paces the REVEAL, not the live agents) ----------
-function transport(on){ ['btn-pause','btn-step','btn-resume'].forEach(id=>$(id).disabled=!on); showResume(false); }
-function showResume(p){ $('btn-pause').style.display=p?'none':''; $('btn-resume').style.display=p?'':'none'; }
-function ctrl(action){
-  fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})})
-    .then(r=>r.json()).then(d=>{ showResume(d.mode==='paused');
-      if(d.mode==='paused'){ $('run-pill').className='run-pill paused'; $('run-txt').textContent='paused'; }
-      else { $('run-pill').className='run-pill run'; $('run-txt').textContent='live'; } });
-}
+function fail(m){ running=false; $('btn-run').disabled=false; $('q').disabled=false; finish({error:m}); }
 
 // ---------- clock ----------
 function startClock(){ t0=Date.now(); stopClock(); timer=setInterval(()=>{

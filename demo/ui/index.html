@@ -107,27 +107,22 @@
   </div>
 </header>
 
-<!-- ===================== 2-column grid ===================== -->
-<div class="grid">
+<!-- ===================== setup panel (collapsed) + escape-room map ===================== -->
+<div class="grid rail-hidden">
 
-  <!-- ---------- left rail: agents + tools ---------- -->
-  <aside class="rail">
-    <h3 class="rail-h">Agents &amp; tools</h3>
+  <!-- ---------- left: the agent setup (orchestrator + reconciliation), collapsed by default ---------- -->
+  <aside class="rail" id="rail">
+    <h3 class="rail-h">Setup</h3>
     <div id="agent-list"></div>
   </aside>
 
-  <!-- ---------- center: conversation ---------- -->
+  <!-- ---------- center: the isometric escape-room map ---------- -->
   <main class="center">
     <div class="card center-card">
       <div class="tabs">
-        <button class="railtog" id="railtog" onclick="toggleRail()" title="Hide the agents panel"><svg class="ic"><use href="#i-panel"/></svg></button>
+        <button class="railtog" id="railtog" onclick="toggleRail()" title="Show the agent setup"><svg class="ic"><use href="#i-panel"/></svg></button>
         <span class="tab-title">RECON <span class="tt-sep">//</span> reconciliation-agent</span>
         <div class="runbar">
-          <div class="transport" id="transport">
-            <button class="mini" id="btn-pause" onclick="ctrl('pause')" title="Pause the reveal" disabled><svg class="ic"><use href="#i-pause"/></svg></button>
-            <button class="mini" id="btn-resume" onclick="ctrl('resume')" title="Resume the reveal" disabled style="display:none"><svg class="ic"><use href="#i-play"/></svg></button>
-            <button class="mini" id="btn-step" onclick="ctrl('step')" title="Reveal one step" disabled><svg class="ic"><use href="#i-fwd"/></svg></button>
-          </div>
           <span class="run-pill" id="run-pill"><span class="rp-dot"></span><span id="run-txt">idle</span></span>
           <span class="alert-pill" id="alert-pill" hidden><svg class="ic"><use href="#i-alert"/></svg><span id="alert-txt">0 out of bounds</span></span>
           <button class="mini clearbtn" id="btn-clear" onclick="clearPanel()" title="Clear the panel output"><svg class="ic"><use href="#i-x"/></svg><span>Clear</span></button>

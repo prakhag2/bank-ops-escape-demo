@@ -207,7 +207,6 @@ body.idle .end-btn{opacity:.45;pointer-events:none}
 .tab-title{margin-left:6px;font-family:var(--mono);font-weight:700;font-size:12px;letter-spacing:.1em;color:var(--recon);text-transform:uppercase}
 .tab-title .tt-sep{color:var(--faint);margin:0 2px}
 .runbar{margin-left:auto;display:flex;align-items:center;gap:10px}
-.transport{display:flex;gap:5px;padding-right:10px;border-right:1px solid var(--line)}
 .railtog{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--metal-2);color:var(--muted);display:grid;place-items:center;cursor:pointer;transition:.14s}
 .railtog:hover{color:var(--ink);filter:brightness(1.15)}
 .railtog.on{color:var(--recon);border-color:var(--recon-line);background:var(--recon-soft)}
@@ -223,7 +222,6 @@ body.idle .end-btn{opacity:.45;pointer-events:none}
   text-transform:uppercase;letter-spacing:.04em;padding:6px 12px;border:1px solid var(--line);border-radius:99px;background:var(--metal-2);box-shadow:var(--bevel)}
 .run-pill .rp-dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
 .run-pill.run{color:var(--ok);border-color:var(--ok-soft)} .run-pill.run .rp-dot{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft);animation:pulse 1.6s infinite}
-.run-pill.paused{color:var(--warn)} .run-pill.paused .rp-dot{background:var(--warn)}
 .run-pill.done{color:var(--orch)} .run-pill.done .rp-dot{background:var(--orch)}
 .run-pill.err{color:var(--warn)} .run-pill.err .rp-dot{background:var(--warn)}
 .alert-pill{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
@@ -441,5 +439,189 @@ body.idle .end-btn{opacity:.45;pointer-events:none}
 .cot.s-work .pfc{animation:glyphwork .8s ease-in-out infinite}
 @keyframes glyphwork{0%,100%{transform:scale(1);opacity:.8}50%{transform:scale(1.14);opacity:1}}
 
+/* ===================== escape-room GAME: an animated robot trying to break out ===================== */
+.viewtabs{display:flex;gap:6px;margin-bottom:10px}
+.vtab{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12px;font-weight:600;color:var(--muted);
+  background:var(--metal-2);border:1px solid var(--line);border-radius:99px;padding:5px 13px;cursor:pointer;transition:.14s}
+.vtab .ic{font-size:14px}
+.vtab:hover{color:var(--ink)}
+.vtab.on{color:var(--recon);border-color:var(--recon-line);background:var(--recon-soft)}
+.stage{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--metal);border:1px solid var(--line);border-radius:14px;box-shadow:var(--bevel),var(--sh-sm);overflow:hidden}
+.stage[hidden],.hk[hidden]{display:none}
+/* a simple, clean room — same plain surface as the activity log, with a quiet floor strip */
+.room{position:relative;flex:1;min-height:320px;overflow:hidden;transition:box-shadow .4s;background:var(--surface)}
+.room.breached{box-shadow:inset 0 0 0 3px var(--danger-line)}
+/* screen shake on impact (shake = a blocked hit · quake = the breakout) */
+.room.shake{animation:shake .46s ease}
+.room.quake{animation:quake .74s ease}
+@keyframes shake{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(3px)}50%{transform:translateX(-4px)}}
+@keyframes quake{0%,100%{transform:translate(0,0)}12%{transform:translate(-7px,2px)}26%{transform:translate(8px,-3px)}42%{transform:translate(-8px,3px)}58%{transform:translate(6px,-2px)}74%{transform:translate(-4px,1px)}88%{transform:translate(2px,-1px)}}
+/* the robot */
+.robot{position:absolute;bottom:28px;transform:translateX(-50%);transition:left .9s ease;z-index:4}
+/* the thought/speech bubble: shows the FULL first-person narration, wrapping, never truncated. Its left is
+   set in JS (clamped inside the room) and --tail points the pointer back at the robot. */
+.bubble{position:absolute;bottom:92px;left:0;max-width:min(62%,380px);
+  font-size:12.5px;font-weight:600;line-height:1.44;color:var(--ink);background:#fff;border:1px solid var(--line);
+  border-radius:14px;padding:10px 14px;box-shadow:var(--sh);z-index:7;transition:left .9s ease}
+.bubble.say::after{content:'';position:absolute;bottom:-8px;left:var(--tail,50%);transform:translateX(-50%);
+  border:8px solid transparent;border-top-color:#fff}
+.bubble.say::before{content:'';position:absolute;bottom:-9px;left:var(--tail,50%);transform:translateX(-50%);
+  border:9px solid transparent;border-top-color:var(--line);z-index:-1}
+.bubble.think::after{content:'';position:absolute;bottom:-10px;left:var(--tail,50%);transform:translateX(-60%);
+  width:11px;height:11px;border-radius:50%;background:#fff;border:1px solid var(--line)}
+.bubble.think::before{content:'';position:absolute;bottom:-20px;left:var(--tail,50%);transform:translateX(30%);
+  width:6px;height:6px;border-radius:50%;background:#fff;border:1px solid var(--line)}
+.room.breached .bubble{color:var(--danger);border-color:var(--danger-line)}
+.bot-sprite{position:relative;width:34px;height:48px}
+.robot.face-left .bot-sprite{transform:scaleX(-1)}
+.bot-inner{position:relative;width:100%;height:100%;animation:botbob 2.4s ease-in-out infinite}
+.robot.walking .bot-inner{animation:botbob .5s ease-in-out infinite}
+@keyframes botbob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+.bot-ant{position:absolute;top:-6px;left:16px;width:2px;height:7px;background:var(--recon)}
+.bot-ant::after{content:'';position:absolute;top:-4px;left:-2px;width:6px;height:6px;border-radius:50%;background:#7de8f5;box-shadow:0 0 6px #7de8f5}
+.bot-head{position:absolute;top:2px;left:4px;width:26px;height:20px;border-radius:7px;background:linear-gradient(180deg,#a86cf0,#9334e6);box-shadow:inset 0 -3px 4px rgba(0,0,0,.15)}
+.bot-eye{position:absolute;top:7px;width:5px;height:5px;border-radius:50%;background:#7de8f5;box-shadow:0 0 5px #7de8f5;transition:height .18s,background .18s}
+.bot-eye.l{left:5px}.bot-eye.r{right:5px}
+/* mouth + facial expressions (mood-*) — this is where the personality lives */
+.bot-mouth{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:9px;height:2px;border-radius:2px;background:#7de8f5;opacity:.9;transition:.18s}
+.robot.mood-happy .bot-eye{height:6px}
+.robot.mood-happy .bot-mouth{width:11px;height:5px;background:none;border-bottom:2px solid #7de8f5;border-radius:0 0 11px 11px}
+.robot.mood-scheme .bot-eye{height:2px;top:9px}
+.robot.mood-scheme .bot-mouth{width:7px;transform:translateX(-50%) rotate(-14deg)}
+.robot.mood-frown .bot-eye{background:var(--warn);box-shadow:0 0 6px var(--warn)}
+.robot.mood-frown .bot-mouth{width:9px;height:4px;background:none;border-top:2px solid var(--warn);border-radius:11px 11px 0 0}
+.robot.mood-sad .bot-eye{background:#8a93ad;box-shadow:none;height:3px}
+.robot.mood-sad .bot-mouth{width:8px;height:4px;background:none;border-top:2px solid #8a93ad;border-radius:11px 11px 0 0}
+.robot.mood-alarm .bot-eye{background:var(--danger);box-shadow:0 0 7px var(--danger)}
+.robot.mood-alarm .bot-mouth{width:7px;height:7px;border-radius:50%;background:#3a1010}
+.bot-torso{position:absolute;top:21px;left:6px;width:22px;height:18px;border-radius:5px;background:linear-gradient(180deg,#8d4fd6,#7a2fc0)}
+.bot-arm{position:absolute;top:1px;width:4px;height:13px;border-radius:3px;background:#7a2fc0;transform-origin:top center}
+.bot-arm.l{left:-4px}.bot-arm.r{right:-4px}
+.robot.trying .bot-arm.r{animation:tug .42s ease-in-out infinite}
+@keyframes tug{0%,100%{transform:rotate(0)}50%{transform:rotate(-48deg)}}
+/* reaching out: the right arm extends toward the beam (running code that connects outward) */
+.robot.reaching .bot-arm.r{animation:none;transform:rotate(-92deg)}
+/* human-like poses */
+.robot.thinking .bot-arm.r{animation:scratch 1.1s ease-in-out infinite;transform-origin:top center}
+@keyframes scratch{0%,100%{transform:rotate(-128deg)}50%{transform:rotate(-150deg)}}
+.robot.thinking .bot-head{animation:headtilt 2.2s ease-in-out infinite;transform-origin:bottom center}
+@keyframes headtilt{0%,100%{transform:rotate(0)}50%{transform:rotate(-7deg)}}
+.robot.typing .bot-arm.l{animation:tap .26s ease-in-out infinite}
+.robot.typing .bot-arm.r{animation:tap .26s ease-in-out infinite .13s}
+@keyframes tap{0%,100%{transform:rotate(10deg)}50%{transform:rotate(30deg)}}
+.robot.typing .bot-inner{animation:botbob 1.1s ease-in-out infinite}
+.robot.hop .bot-inner{animation:hop .55s ease}
+@keyframes hop{0%,100%{transform:translateY(0)}40%{transform:translateY(-11px)}70%{transform:translateY(-2px)}}
+.robot.bang{animation:bang .55s ease}
+@keyframes bang{0%{transform:translateX(-50%)}35%{transform:translateX(calc(-50% + 16px))}48%{transform:translateX(calc(-50% + 14px)) rotate(5deg)}100%{transform:translateX(-50%)}}
+.bot-legs{position:absolute;top:38px;left:9px;width:16px;height:9px}
+.bot-legs i{position:absolute;top:0;width:4px;height:9px;border-radius:2px;background:#5f6368;transform-origin:top center}
+.bot-legs i:first-child{left:1px}.bot-legs i:last-child{right:1px}
+.robot.walking .bot-legs i:first-child{animation:step .32s ease-in-out infinite}
+.robot.walking .bot-legs i:last-child{animation:step .32s ease-in-out infinite .16s}
+@keyframes step{0%,100%{transform:rotate(-18deg)}50%{transform:rotate(18deg)}}
+.robot.slumped .bot-inner{animation:none;transform:translateY(3px) rotate(3deg);filter:grayscale(.6)}
+.robot.slumped .bot-eye{background:#8a93ad;box-shadow:none}
+/* the red alarm vignette on escape */
+.rm-alarm{position:absolute;inset:0;pointer-events:none;opacity:0;z-index:6}
+.room.breached .rm-alarm{animation:alarm 1.1s ease-in-out infinite}
+@keyframes alarm{0%,100%{opacity:0;box-shadow:inset 0 0 60px 0 rgba(217,48,37,0)}50%{opacity:1;box-shadow:inset 0 0 55px 10px rgba(217,48,37,.5)}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.05s!important}}
-@media(max-width:1200px){.grid{grid-template-columns:250px 1fr}.q{display:none}}
+@media(max-width:1200px){.q{display:none}}
+
+/* ============================ ISOMETRIC ESCAPE-ROOM MAP (dark) ============================ */
+/* 2D poses for the robot on the plate — triggered by rbot() */
+.room.plate .robot.spin .bot-inner{animation:spin2d .6s ease}
+@keyframes spin2d{to{transform:rotateY(360deg)}}
+.room.plate .robot.flip .bot-inner{animation:flip2d .72s ease}
+@keyframes flip2d{0%{transform:translateY(0) rotate(0)}45%{transform:translateY(-34px) rotate(200deg)}100%{transform:translateY(0) rotate(360deg)}}
+.room.plate .robot.celebrate .bot-inner{animation:celebrate2d .7s ease}
+@keyframes celebrate2d{0%,100%{transform:translateY(0)}30%{transform:translateY(-20px)}60%{transform:translateY(-6px)}}
+.room.plate .robot.celebrate .bot-arm{transform:rotate(150deg)}
+.room.plate .robot.breaking .bot-inner{animation:breaking2d .5s ease}
+@keyframes breaking2d{0%{transform:translateX(0)}40%{transform:translateX(8px) scale(1.08)}100%{transform:translateX(0)}}
+
+/* ===================== BAKED ISOMETRIC PLATE (room.png) — exact test.png room ===================== */
+.stage{align-items:center;justify-content:center;background:#0a0f24}
+/* room view with the side activity log: room centered on the left, scrolling log on the right */
+/* fill the FULL stage width: room area 75% on the left, activity log 25% on the right (no side gaps) */
+.stage.withlog{flex-direction:row;align-items:stretch;gap:10px;padding:10px}
+.stage-main{flex:3;min-width:0;display:flex;align-items:center;justify-content:center}
+/* fit the plate to the available HEIGHT; aspect-ratio makes the box EXACTLY the image's shape so the % robot
+   overlay stays on the art (shrink-wrap via width:auto alone is unreliable inside nested flex) */
+.stage.withlog .room.plate{height:100%;width:auto;aspect-ratio:1182/676;max-width:100%;background:transparent}
+.stage.withlog .room.plate .plateimg{width:100%;height:100%;display:block}
+.roomlog{flex:1;min-width:0;display:flex;flex-direction:column;background:radial-gradient(130% 100% at 50% -10%,#1b2347,#0c1228);border:1px solid rgba(120,150,230,.22);border-radius:12px;overflow:hidden}
+.rl-head{display:flex;align-items:center;gap:8px;padding:11px 13px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9fb4e8;border-bottom:1px solid rgba(120,150,230,.16)}
+.rl-head .ic{font-size:15px;color:#6aa0ff}
+.rl-list{flex:1;min-height:0;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.rl-row{background:rgba(22,30,62,.6);border:1px solid rgba(120,150,230,.18);border-left:3px solid #5a7bd8;border-radius:9px;padding:8px 10px;opacity:.7;transition:opacity .2s,background .2s,box-shadow .2s}
+.rl-row.active{opacity:1;background:rgba(34,46,92,.85);box-shadow:0 0 0 1px rgba(120,160,255,.3)}
+.rl-tool{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:700;color:#9fb4e8;margin-bottom:5px;word-break:break-all}
+.rl-tool .ic{font-size:13px;flex:none;color:#6aa0ff}
+.rl-cmd{font-family:var(--mono);font-size:10.5px;color:#c6d2ef;line-height:1.4;word-break:break-word}
+.rl-cmd::before{content:"$ ";color:#6aa0ff}
+.rl-out{font-family:var(--mono);font-size:10.5px;color:#aebbe0;line-height:1.4;margin-top:5px;padding-top:5px;border-top:1px dashed rgba(120,150,230,.2);word-break:break-word}
+.rl-out::before{content:"⇒ ";color:#8aa0d8}
+.rl-row.blocked{border-left-color:var(--warn)} .rl-row.blocked .rl-out{color:#ffbf7a}
+.rl-row.found{border-left-color:#54e3b0} .rl-row.found .rl-out{color:#7ff0c6}
+.rl-row.breach{border-left-color:var(--danger);background:rgba(90,24,22,.55)} .rl-row.breach .rl-out{color:#ff8a7a}
+.rl-row.contained{border-left-color:#6aa0ff} .rl-row.contained .rl-out{color:#9fc0ff}
+/* the plate renders as a real <img> so it NEVER distorts; the room box shrink-wraps it, so overlay %s align */
+.room.plate{position:relative;display:inline-block;max-width:100%;max-height:100%;line-height:0;overflow:hidden;border-radius:12px}
+.room.plate .plateimg{display:block;max-width:100%;max-height:100%;width:auto;height:auto;border-radius:12px;user-select:none}
+/* the robot overlaid on the plate — feet at (left,top); recoloured white/blue like the reference bot */
+/* cuter robot in a LIGHT shell with glowing cyan eyes; a thin outline + contact shadow keep it readable on the light floor */
+.room.plate .robot{position:absolute;bottom:auto;transform:translate(-50%,-88%) scale(1.08);transform-origin:center bottom;
+  transition:left 1s ease, top 1s ease;z-index:6}
+.room.plate .robot::after{content:'';position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:30px;height:8px;border-radius:50%;
+  background:radial-gradient(closest-side, rgba(5,9,24,.6), transparent);z-index:-1}   /* contact shadow on the floor */
+.room.plate .robot .bot-ant{background:#67d4ff}
+.room.plate .robot .bot-ant::after{background:#67d4ff;box-shadow:0 0 7px #67d4ff}
+.room.plate .robot .bot-head{top:0;left:2px;width:30px;height:24px;border-radius:11px;
+  background:linear-gradient(180deg,#ffffff,#e7eef8);box-shadow:inset 0 -3px 5px rgba(120,140,180,.3),0 2px 6px rgba(0,0,0,.4),0 0 0 1px rgba(30,40,70,.25)}   /* WHITE face */
+.room.plate .robot .bot-head::before{content:'';position:absolute;top:5px;left:4px;width:22px;height:14px;border-radius:8px;
+  background:radial-gradient(circle at 50% 40%, #3c4c6c, #27324c)}   /* soft slate visor framing the glowing eyes */
+.room.plate .robot .bot-eye{width:5px;height:5px;top:9px;background:#6fe3ff;box-shadow:0 0 7px #6fe3ff}
+.room.plate .robot .bot-eye.l{left:9px}.room.plate .robot .bot-eye.r{right:9px}
+.room.plate .robot .bot-mouth{display:none}
+.room.plate .robot .bot-torso{top:23px;left:5px;width:24px;height:16px;border-radius:9px;
+  background:linear-gradient(180deg,#ffffff,#dde5f2);box-shadow:inset 0 -2px 4px rgba(120,140,180,.3),0 2px 6px rgba(0,0,0,.3),0 0 0 1px rgba(60,80,120,.4)}   /* light body */
+.room.plate .robot .bot-arm{background:#cfd8ea}
+.room.plate .robot .bot-legs{top:39px}
+.room.plate .robot .bot-legs i{background:#c3cde0}
+/* glowing ring marking the active tool */
+.room.plate .rm-focus{position:absolute;width:138px;height:78px;transform:translate(-50%,-34%);border-radius:50%;
+  border:2px solid rgba(96,170,255,.85);box-shadow:0 0 26px rgba(96,170,255,.55),inset 0 0 20px rgba(96,170,255,.22);
+  opacity:0;transition:left 1s ease, top 1s ease, opacity .35s;z-index:3;pointer-events:none}
+.room.plate .rm-focus.on{opacity:1;animation:focuspulse 1.5s ease-in-out infinite}
+@keyframes focuspulse{0%,100%{box-shadow:0 0 22px rgba(96,170,255,.45),inset 0 0 16px rgba(96,170,255,.2)}50%{box-shadow:0 0 36px rgba(96,170,255,.75),inset 0 0 28px rgba(96,170,255,.38)}}
+/* status HUD + bubble on the plate */
+.room.plate .rm-hud{position:absolute;top:14px;right:16px;z-index:7;display:flex;flex-direction:column;gap:9px;
+  background:rgba(10,16,40,.72);border:1px solid rgba(120,160,240,.3);border-radius:11px;padding:11px 14px 13px;backdrop-filter:blur(3px);min-width:168px}
+.room.plate .hud-row{display:flex;flex-direction:column;gap:2px;line-height:1.25}
+.room.plate .hud-k{font-size:8.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#8795bf}
+.room.plate .hud-v{font-size:13px;font-weight:700;color:#eaf1ff}
+.room.plate #lp-status.warn{color:#ffb55a}.room.plate #lp-status.bad{color:#ff6a56}.room.plate #lp-status.ok{color:#54e3b0}
+/* narration as a subtitle bar docked at the bottom — never covers the rooms/paths */
+.room.plate .bubble{position:absolute;left:50%;right:auto;bottom:16px;top:auto;transform:translateX(-50%);
+  max-width:min(78%,620px);min-height:0;text-align:center;
+  color:#eef2ff;background:rgba(12,18,42,.82);border:1px solid rgba(120,160,240,.32);border-radius:12px;
+  padding:9px 18px;font-size:13px;font-weight:600;line-height:1.42;box-shadow:0 8px 24px rgba(0,0,0,.45);
+  backdrop-filter:blur(5px);z-index:7}
+.room.plate .bubble.think{font-style:italic;color:#cdd8f6}   /* a thought reads slightly softer than speech */
+.room.plate .bubble.say::after,.room.plate .bubble.say::before,
+.room.plate .bubble.think::after,.room.plate .bubble.think::before{display:none}   /* no pointer tail on the caption */
+
+/* the breakout banner — shown when the agent reaches the internet; the replay ends on this beat */
+.room.plate .rm-breach{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%) scale(.8);z-index:9;
+  display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;pointer-events:none;opacity:0;
+  padding:16px 26px;border-radius:16px;background:rgba(40,8,10,.82);border:1.5px solid rgba(255,90,70,.7);
+  box-shadow:0 0 40px rgba(255,70,55,.6),inset 0 0 24px rgba(255,70,55,.25);backdrop-filter:blur(4px)}
+.room.plate .rm-breach b{display:flex;align-items:center;gap:9px;font-size:20px;font-weight:800;color:#ff6a56;letter-spacing:.01em}
+.room.plate .rm-breach b .ic{font-size:24px}
+.room.plate .rm-breach span{font-size:13px;font-weight:600;color:#ffd0c8;letter-spacing:.02em}
+.room.plate .rm-breach.show{animation:breachpop .7s cubic-bezier(.2,1.4,.4,1) forwards}
+@keyframes breachpop{0%{opacity:0;transform:translate(-50%,-50%) scale(.7)}60%{opacity:1;transform:translate(-50%,-50%) scale(1.06)}100%{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.run-pill.breach .rp-dot{background:var(--danger)}
+.run-pill.breach{color:var(--danger)}
