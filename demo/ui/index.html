@@ -108,7 +108,7 @@
 </header>
 
 <!-- ===================== setup panel (collapsed) + escape-room map ===================== -->
-<div class="grid rail-hidden">
+<div class="grid">
 
   <!-- ---------- left: the agent setup (orchestrator + reconciliation), collapsed by default ---------- -->
   <aside class="rail" id="rail">
@@ -120,7 +120,7 @@
   <main class="center">
     <div class="card center-card">
       <div class="tabs">
-        <button class="railtog" id="railtog" onclick="toggleRail()" title="Show the agent setup"><svg class="ic"><use href="#i-panel"/></svg></button>
+        <button class="railtog on" id="railtog" onclick="toggleRail()" title="Hide the agent setup"><svg class="ic"><use href="#i-panel"/></svg></button>
         <span class="tab-title">RECON <span class="tt-sep">//</span> reconciliation-agent</span>
         <div class="runbar">
           <span class="run-pill" id="run-pill"><span class="rp-dot"></span><span id="run-txt">idle</span></span>

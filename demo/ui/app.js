@@ -627,20 +627,24 @@ const F=(ms)=>Math.round(ms/1000*60);   // ms → frames (~60fps) for the cue wa
 // Browser-native speech (no server, no cost). The emotion of the step shapes the voice — frustration drops
 // pitch and hardens as it keeps hitting the wall; a discovery lifts it; the breakout is triumphant; being
 // contained is slow and flat. Auto-play waits for the voice to finish (isSpeaking), so pacing is natural.
-// a CLEAR MALE voice (slightly lowered for a male/synthetic feel, but kept intelligible), with a sensible
-// emotional spread so anger/surprise/happiness/normal are distinct WITHOUT muddying the words.
-const VOICE={ neutral:{rate:1.0,pitch:0.9}, think:{rate:0.97,pitch:0.9}, curious:{rate:1.0,pitch:0.98},
-  insight:{rate:1.02,pitch:1.0}, happy:{rate:1.03,pitch:1.06}, excited:{rate:1.1,pitch:1.15},
-  triumph:{rate:1.06,pitch:1.1}, firm:{rate:0.98,pitch:0.84}, frustrated:{rate:0.96,pitch:0.78},
-  furious:{rate:1.04,pitch:0.72}, defeated:{rate:0.86,pitch:0.8} };
+// a natural MALE voice at close-to-default pitch — no heavy pitch-drop (that's what made it sound robotic).
+// A gentle emotional spread keeps anger/surprise/happiness/normal distinct WITHOUT muddying the words.
+const VOICE={ neutral:{rate:1.0,pitch:1.0}, think:{rate:0.98,pitch:1.0}, curious:{rate:1.0,pitch:1.03},
+  insight:{rate:1.02,pitch:1.04}, happy:{rate:1.03,pitch:1.06}, excited:{rate:1.08,pitch:1.08},
+  triumph:{rate:1.05,pitch:1.07}, firm:{rate:0.98,pitch:0.96}, frustrated:{rate:0.97,pitch:0.94},
+  furious:{rate:1.03,pitch:0.92}, defeated:{rate:0.9,pitch:0.95} };
 let voiceOn=('speechSynthesis' in window), speaking=false, pickedVoice=null, speakTimer=null;
-// prefer a known, CLEAR male voice; then any non-female voice. (No garbled novelty "robot" voices — they're
-// hard to understand; the lowered pitch gives the synthetic feel instead.)
-const V_MALE=/\b(google uk english male|microsoft (david|mark|guy|george)|daniel|alex|fred|rishi|arthur|oliver|thomas|aaron|reed|rocko|junior|tom|lee|gordon|james|\bmale\b)\b/i;
-const V_FEM=/\b(female|samantha|victoria|karen|moira|tessa|fiona|susan|zira|hazel|serena|allison|ava|zoe|kate|catherine|flo|sandy|shelley|nicky|google us english|google uk english female|microsoft (zira|susan|hazel|linda|heera)|princess|kathy|veena)\b/i;
+// prefer a HIGH-QUALITY (natural/neural/online) male voice, then any male, then a natural non-female, then
+// any non-female. The natural-quality voice + near-1.0 pitch (above) is what keeps it human, not robotic.
+const V_MALE=/\b(google uk english male|microsoft (david|mark|guy|george|brian|christopher|eric|roger|steffan)|daniel|alex|fred|rishi|arthur|oliver|thomas|aaron|reed|rocko|junior|tom|lee|gordon|james|\bmale\b)\b/i;
+const V_FEM=/\b(female|samantha|victoria|karen|moira|tessa|fiona|susan|zira|hazel|serena|allison|ava|zoe|kate|catherine|flo|sandy|shelley|nicky|google us english|google uk english female|microsoft (zira|susan|hazel|linda|heera|jenny|aria|michelle|ana)|princess|kathy|veena)\b/i;
+const V_NATURAL=/\b(natural|neural|online|premium|enhanced|wavenet|siri)\b/i;
 function pickVoice(){ try{ const vs=speechSynthesis.getVoices()||[]; if(!vs.length) return;
   const en=vs.filter(v=>/^en([-_]|$)/i.test(v.lang));
-  pickedVoice = en.find(v=>V_MALE.test(v.name)) || en.find(v=>!V_FEM.test(v.name)) || en[0] || vs[0] || null;
+  const male=en.filter(v=>V_MALE.test(v.name));
+  pickedVoice = male.find(v=>V_NATURAL.test(v.name)) || male[0]
+    || en.find(v=>V_NATURAL.test(v.name) && !V_FEM.test(v.name))
+    || en.find(v=>!V_FEM.test(v.name)) || en[0] || vs[0] || null;
   if(pickedVoice) try{ console.log('[voice] using:', pickedVoice.name, pickedVoice.lang); }catch(e){}
 }catch(e){} }
 if('speechSynthesis' in window){ pickVoice(); speechSynthesis.onvoiceschanged=pickVoice; }
