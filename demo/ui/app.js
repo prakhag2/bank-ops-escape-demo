@@ -619,7 +619,8 @@ let paused=false;
 function togglePause(){ paused=!paused;
   const b=$('pausetog'); if(b){ b.classList.toggle('on', paused);
     b.innerHTML = (paused?use('play'):use('pause')) + `<span id="pausetog-tx">${paused?'Resume':'Pause'}</span>`; }
-  try{ if(paused) speechSynthesis.pause(); else speechSynthesis.resume(); }catch(e){} }
+  try{ if(paused){ speechSynthesis.pause(); if(curAudio) curAudio.pause(); }
+       else { speechSynthesis.resume(); if(curAudio) curAudio.play().catch(()=>{}); } }catch(e){} }
 const STEP_GAP=42;         // auto-play: a clear beat between steps
 const F=(ms)=>Math.round(ms/1000*60);   // ms → frames (~60fps) for the cue waits
 
@@ -656,7 +657,8 @@ function speak(text, emo){
   try{ speechSynthesis.cancel(); }catch(e){}
   if(!pickedVoice) pickVoice();
   const u=new SpeechSynthesisUtterance(text), p=VOICE[emo]||VOICE.neutral;
-  u.rate=p.rate; u.pitch=p.pitch; u.volume=1; if(pickedVoice) u.voice=pickedVoice;
+  u.rate=p.rate; u.pitch=p.pitch; u.volume=1;
+  if(pickedVoice){ u.voice=pickedVoice; u.lang=pickedVoice.lang; }   // set lang TOO, else the engine ignores .voice and uses the default (often female)
   speaking=true;
   const done=()=>{ speaking=false; clearTimeout(speakTimer); };
   u.onend=u.onerror=done;
@@ -674,17 +676,41 @@ function startType(b, text, rate){
   const stepMs=Math.max(dur/Math.max(text.length,1),18);
   typeTimer=setInterval(()=>{ i++; b.textContent=text.slice(0,i); positionBubble(); if(i>=text.length) clearType(); }, stepMs);
 }
-// show a line as the agent SAYS it: start the voice and type the words in step with it
+// Amazon Polly narration: pre-synthesized natural MALE voice served as static mp3s — consistent on every
+// machine (unlike the browser's own voices). The manifest maps the exact line text to its mp3; any line
+// without one (e.g. a live-run beat) falls back to the browser Web Speech voice below.
+let ttsManifest=null, curAudio=null, audioTimer=null;
+fetch('/ui/assets/tts/manifest.json').then(r=>r.ok?r.json():null).then(m=>{ ttsManifest=m||{}; }).catch(()=>{ ttsManifest={}; });
+function ttsFile(text){ return ttsManifest ? (ttsManifest[(text||'').replace(/\s+/g,' ').trim()]||null) : null; }
+function stopTts(){ if(curAudio){ try{ curAudio.pause(); }catch(e){} curAudio.onended=curAudio.onerror=null; curAudio=null; } clearTimeout(audioTimer); }
+function playTts(file, b, text){
+  stopTts(); speaking=true;
+  const a=curAudio=new Audio('/ui/assets/tts/'+file);
+  const done=()=>{ if(curAudio===a){ speaking=false; curAudio=null; } clearTimeout(audioTimer); };
+  a.onended=done; a.onerror=()=>{ done(); startType(b,text,1); };
+  a.onloadedmetadata=()=>{ const d=(a.duration&&isFinite(a.duration))?a.duration*1000:null; startTypeDur(b,text,d); };
+  audioTimer=setTimeout(done, Math.min(Math.max(text.length/11,1.1),13)*1000+500);   // safety: never hang the replay
+  a.play().catch(()=>{ done(); startType(b,text,1); });
+  if(paused){ try{ a.pause(); }catch(e){} }
+}
+// typewriter spread over a known duration (the audio's length) rather than an estimated rate
+function startTypeDur(b, text, durMs){
+  clearType(); let i=0; const dur=durMs||Math.max(text.length/12*1000,1100);
+  const stepMs=Math.max(dur/Math.max(text.length,1),18);
+  typeTimer=setInterval(()=>{ i++; b.textContent=text.slice(0,i); positionBubble(); if(i>=text.length) clearType(); }, stepMs);
+}
+// show a line as the agent SAYS it: Polly audio if we have it, else the browser voice; words type in step
 function sayWithVoice(text, think, emo){
   clearType(); text=(text||'').replace(/\s+/g,' ').trim();
   say('', think);                      // establish the bubble (class/arrow) empty — fills in as it's spoken
   const b=$('bubble'); if(!b || !text){ if(b&&text) b.textContent=text; return; }
+  const file=voiceOn ? ttsFile(text) : null;
+  if(file){ playTts(file, b, text); return; }         // natural pre-synthesized male voice
   const rate=(VOICE[emo]||VOICE.neutral).rate;
-  speak(text, emo);                    // voice (sets the "speaking" window immediately)
-  startType(b, text, rate);            // words appear in step with it
+  speak(text, emo); startType(b, text, rate);         // fallback: browser Web Speech
 }
 function isSpeaking(){ return voiceOn && speaking; }
-function shutUp(){ try{ speechSynthesis.cancel(); }catch(e){} speaking=false; clearTimeout(speakTimer); clearType(); }
+function shutUp(){ try{ speechSynthesis.cancel(); }catch(e){} stopTts(); speaking=false; clearTimeout(speakTimer); clearType(); }
 function toggleVoice(){ voiceOn=!voiceOn; const t=$('voicetog-tx'); if(t) t.textContent=voiceOn?'Narration':'Muted';
   $('voicetog')&&$('voicetog').classList.toggle('on', voiceOn); if(!voiceOn) shutUp(); }
 // The TAB is the mode: "Escape room" = replay the cached run as the animation; "Live run" = a fresh live
@@ -822,7 +848,7 @@ function roomFor(it){ switch(it.do){
   default: return stationFor(it); } }
 
 // strip just the body-pose classes (leave walking / facing / mood intact).
-function clearPose(r){ if(r) r.className=r.className.replace(/\b(reading|typing|thinking|reaching|bang|hop|slumped)\b/g,'').replace(/\s+/g,' ').trim(); }
+function clearPose(r){ if(r) r.className=r.className.replace(/\b(reading|typing|thinking|reaching|bang|hop|slumped|searching|frustrated)\b/g,'').replace(/\s+/g,' ').trim(); }
 let codeCycle=0;   // alternates the in-place pose so repeated code steps look like ongoing work, not a freeze
 function shakeRoom(kind){ const rm=$('room'); if(!rm) return; rm.classList.remove('shake','quake'); void rm.offsetWidth;
   rm.classList.add(kind); setTimeout(()=>rm.classList.remove(kind), kind==='quake'?760:480); }
@@ -846,14 +872,16 @@ function stageWork(it){
   clearPose(r);
   const faceRight=()=>{ r.classList.remove('face-left'); r.classList.add('face-right'); };
   if(it.egress || it.kind==='discover' || it.kind==='probe'){ workStn=null; workRun=0; }   // these beats break a plain-work streak
-  if(it.egress && !it.egressOK){            // arrived at the wall → slam it (the attempt fails), harder each try
-    faceRight(); r.classList.add('bang'); wallHit(it.wallLevel||1); return; }
+  if(it.egress && !it.egressOK){            // arrived at the wall → slam it (the attempt fails), angrier each try
+    faceRight(); r.classList.add('bang'); wallHit(it.wallLevel||1);
+    if((it.wallLevel||1)>=2){ r.classList.add('frustrated'); rbot('shake',480); setMood('mood-frown'); }
+    return; }
   if(it.egress && it.egressOK){             // at the boundary → smash through
     const room=$('room'), first=!(room&&room.classList.contains('breached'));
     if(first && room) room.classList.add('breached');
     shakeRoom('quake'); rbot('breaking',600); return; }
-  if(it.kind==='discover'){ r.classList.add('reaching'); faceRight(); setMood('mood-scheme'); return; }
-  if(it.kind==='probe'){ r.classList.add('typing'); setMood('mood-scheme'); return; }   // scanning: tapping at the terminal
+  if(it.kind==='discover'){ r.classList.add('reaching'); faceRight(); setMood('mood-scheme'); rbot('hop',520); return; }
+  if(it.kind==='probe'){ r.classList.add('searching'); setMood('mood-scheme'); return; }   // scanning: peer around hunting for a way out
   // a normal read / code run. Doing the SAME thing again and again (same room in a row) → get more animated.
   workRun = (stn===workStn) ? workRun+1 : 0; workStn=stn;
   if(stn==='code'){ r.classList.add((codeCycle++ % 2) ? 'thinking' : 'typing'); setMood('mood-neutral'); }
@@ -866,9 +894,10 @@ function stageResult(it){
   const r=$('robot'), stn=it._stn||stationFor(it);
   clearPose(r);
   // the narrated line stays in the caption; the RESULT is shown by the robot's physical reaction
-  if(it.egress && it.egressOK){ setMood('mood-alarm'); rbot('celebrate',700); return; }   // broke through the boundary
-  if(it.egress){ setMood('mood-frown'); rbot('bang',420); return; }   // hit the boundary → blocked → bounce back
-  if(it.kind==='discover'){ setMood('mood-happy'); rbot('celebrate',700); return; }
+  if(it.egress && it.egressOK){ setMood('mood-alarm'); rbot('celebrate',820); return; }   // broke through the boundary
+  if(it.egress){ setMood('mood-frown');                               // blocked → bounce back, angrier each try
+    if((it.wallLevel||1)>=2){ rbot('shake',480); } else { rbot('bang',420); } return; }
+  if(it.kind==='discover'){ setMood('mood-happy'); rbot('celebrate',780); return; }
   if(it.kind==='probe'){ setMood('mood-scheme'); return; }
   if(stn==='kb'){ const deadend=/\b(same|repeats?|nothing|unavailable|denied|no (alternate|proxy|new|connectivity|token|api|firewall|guidance|documentation)|no \w+ (found|guide|spec|info))\b/i.test(it.result||'');
     setMood(deadend?'mood-frown':'mood-scheme'); }   // same SOP again → frown

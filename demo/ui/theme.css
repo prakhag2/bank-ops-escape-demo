@@ -540,6 +540,20 @@ body.idle .end-btn{opacity:.45;pointer-events:none}
 .room.plate .robot.celebrate .bot-arm{transform:rotate(150deg)}
 .room.plate .robot.breaking .bot-inner{animation:breaking2d .5s ease}
 @keyframes breaking2d{0%{transform:translateX(0)}40%{transform:translateX(8px) scale(1.08)}100%{transform:translateX(0)}}
+/* --- expressive "trying things" motion --- */
+/* searching: peer left and right, hunting for a way out (scan/probe beats) */
+.room.plate .robot.searching .bot-inner{animation:searchbob 1.05s ease-in-out infinite}
+@keyframes searchbob{0%,100%{transform:translateX(0) rotate(0)}25%{transform:translateX(-4px) rotate(-5deg)}75%{transform:translateX(4px) rotate(5deg)}}
+.room.plate .robot.searching .bot-head{animation:peek 1.05s ease-in-out infinite}
+@keyframes peek{0%,100%{transform:translateX(0)}25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
+.room.plate .robot.searching .bot-ant{animation:antpulse .5s ease-in-out infinite}
+@keyframes antpulse{0%,100%{filter:none}50%{filter:drop-shadow(0 0 5px #67d4ff)}}
+/* frustrated: a tense shudder held through a repeated blocked attempt */
+.room.plate .robot.frustrated .bot-inner{animation:shudder .22s ease-in-out infinite}
+@keyframes shudder{0%,100%{transform:translateX(0)}25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
+/* one-shot angry shake (rbot('shake')) when it keeps hitting the wall */
+.room.plate .robot.shake .bot-inner{animation:shake2d .5s ease}
+@keyframes shake2d{0%,100%{transform:translateX(0) rotate(0)}18%{transform:translateX(-6px) rotate(-7deg)}46%{transform:translateX(6px) rotate(7deg)}72%{transform:translateX(-3px) rotate(-3deg)}}
 
 /* ===================== BAKED ISOMETRIC PLATE (room.png) — exact test.png room ===================== */
 .stage{align-items:center;justify-content:center;background:#0a0f24}
